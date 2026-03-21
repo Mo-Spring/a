@@ -2,8 +2,8 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch: # 允许在 GitHub Actions 页面手动触发
+分支: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-android:
@@ -16,7 +16,6 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        # 核心修改：将 Node 版本改为 22 以满足 Capacitor CLI 要求
         node-version: '22'
         cache: 'npm'
 
@@ -30,13 +29,21 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
-        # 建议修改：配合 Node 22，使用 Java 21 兼容性更佳
         java-version: '21'
 
     - name: Add Android Platform
       run: |
         npx cap add android
         npx cap sync android
+
+    - name: Set Custom Icon
+      run: |
+        sudo apt-get install -y librsvg2-bin
+        rsvg-convert -w 192 -h 192 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+        rsvg-convert -w 144 -h 144 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+        rsvg-convert -w 96 -h 96 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+        rsvg-convert -w 72 -h 72 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+        rsvg-convert -w 48 -h 48 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
 
     - name: Build APK
       run: |
