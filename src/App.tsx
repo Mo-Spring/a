@@ -30,7 +30,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Industry, Company, AIConfig, ViewType, NavigationState, Index } from './types';
+import { Industry, Company, AIConfig, ViewType, NavigationState, Index, ValuationConfig, VALUATION_PRESETS, PresetName } from './types';
 import { INDUSTRIES, HK_INDUSTRIES, DEFAULT_CONFIG, PROVIDERS } from './constants';
 import { DEFAULT_INDICES } from './indices';
 import { getAIResponse } from './services/aiService';
@@ -572,7 +572,19 @@ export default function App() {
   const [activeAiConvId, setActiveAiConvId] = useState<string | null>(() => aiConversations.length > 0 ? aiConversations[0].id : null);
   const [showAiConvList, setShowAiConvList] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  // 估值模型参数（从 localStorage 恢复，默认中性方案）
+  const [valuationConfig, setValuationConfig] = useState<ValuationConfig>(() => {
+    const saved = localStorage.getItem('iv_val_cfg');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    return VALUATION_PRESETS.neutral.config;
+  });
+  // 当前选中的预设方案（null = 自定义）
+  const [activePreset, setActivePreset] = useState<PresetName | null>(() => {
+    return localStorage.getItem('iv_val_preset') as PresetName || 'neutral';
+  });
+  const [settingsTab, setSettingsTab] = useState<'ai' | 'data' | 'valuation'>('ai');
   const [livePrice, setLivePrice] = useState<{ 
     p: string; ch: string; cp: string; up: boolean;
     pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string; fcap?: string;
@@ -605,13 +617,12 @@ export default function App() {
   const navStackRef = useRef<NavigationState[]>([]);
   const navArgsRef = useRef<any[]>([]);
   const viewRef = useRef<ViewType>(view);
-  const showSettingsRef = useRef(showSettings);
+  const showSettingsRef = useRef(false); // kept for back button compat
 
   // 同步 state → ref
   useEffect(() => { navStackRef.current = navStack; }, [navStack]);
   useEffect(() => { navArgsRef.current = navArgs; }, [navArgs]);
   useEffect(() => { viewRef.current = view; }, [view]);
-  useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
 
   // 状态栏：不覆盖 WebView，根据主题适配
   useEffect(() => {
@@ -629,12 +640,7 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const listener = CapApp.addListener('backButton', () => {
-      // 1. 设置面板打开时 → 关闭设置
-      if (showSettingsRef.current) {
-        setShowSettings(false);
-        return;
-      }
-      // 2. 有导航栈 → 返回上一页
+      // 1. 有导航栈 → 返回上一页
       const stack = navStackRef.current;
       if (stack.length > 0) {
         const prev = stack[stack.length - 1];
@@ -901,7 +907,7 @@ export default function App() {
           }
         }
         if (data.pe > 0 && data.eps > 0) {
-          const valuation = calculateValuationSummary(data, industryPE);
+          const valuation = calculateValuationSummary(data, industryPE, valuationConfig);
           setValuationResults(prev => ({ ...prev, [code]: valuation }));
         }
       } catch (e) {
@@ -1297,7 +1303,6 @@ export default function App() {
     setDeletedCompanies([]);
     localStorage.removeItem('iv_deleted_comps');
     setView('home');
-    setShowSettings(false);
   };
 
   const handleRestoreDefaultIndices = () => {
@@ -1880,10 +1885,15 @@ export default function App() {
                 <h3 className="text-xs font-bold text-indigo-600 flex items-center gap-1">
                   <TrendingUp size={14} /> 多模型综合估值
                 </h3>
-                {isLoading && <Loader2 size={14} className="animate-spin text-indigo-400" />}
-                {realtimeData && realtimeData.source === 'live' && (
-                  <span className="text-[9px] text-emerald-500 font-bold">● 实时数据</span>
-                )}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => navigate('settings')} className="text-[9px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-500 font-bold hover:bg-indigo-100 transition-colors">
+                    {activePreset ? VALUATION_PRESETS[activePreset].name : '自定义'} ⚙️
+                  </button>
+                  {isLoading && <Loader2 size={14} className="animate-spin text-indigo-400" />}
+                  {realtimeData && realtimeData.source === 'live' && (
+                    <span className="text-[9px] text-emerald-500 font-bold">● 实时</span>
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 {/* DCF 模型 */}
@@ -2873,6 +2883,182 @@ export default function App() {
     );
   };
 
+  // ─── 设置页面 ───
+  const renderSettings = () => {
+    // 更新估值参数的辅助函数
+    const updateDCF = (key: string, val: number) => {
+      const newCfg = { ...valuationConfig, dcf: { ...valuationConfig.dcf, [key]: val } };
+      setValuationConfig(newCfg);
+      setActivePreset(null);
+      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
+      localStorage.removeItem('iv_val_preset');
+    };
+    const updatePE = (key: string, val: number) => {
+      const newCfg = { ...valuationConfig, pe: { ...valuationConfig.pe, [key]: val } };
+      setValuationConfig(newCfg);
+      setActivePreset(null);
+      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
+      localStorage.removeItem('iv_val_preset');
+    };
+    const updateGordon = (key: string, val: number) => {
+      const newCfg = { ...valuationConfig, gordon: { ...valuationConfig.gordon, [key]: val } };
+      setValuationConfig(newCfg);
+      setActivePreset(null);
+      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
+      localStorage.removeItem('iv_val_preset');
+    };
+    const applyPreset = (name: PresetName) => {
+      const cfg = VALUATION_PRESETS[name].config;
+      setValuationConfig(cfg);
+      setActivePreset(name);
+      localStorage.setItem('iv_val_cfg', JSON.stringify(cfg));
+      localStorage.setItem('iv_val_preset', name);
+    };
+
+    // 滑块组件
+    const Slider = ({ label, value, min, max, step, unit, onChange, desc }: {
+      label: string; value: number; min: number; max: number; step: number;
+      unit: string; onChange: (v: number) => void; desc?: string;
+    }) => (
+      <div className="space-y-1">
+        <div className="flex justify-between items-center">
+          <span className="text-xs text-slate-600 font-medium">{label}</span>
+          <span className="text-xs font-mono font-bold text-indigo-600">{(value * (unit === '%' ? 100 : 1)).toFixed(unit === '%' ? 1 : 2)}{unit}</span>
+        </div>
+        <input type="range" min={min} max={max} step={step} value={value}
+          onChange={e => onChange(parseFloat(e.target.value))}
+          className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-500"
+        />
+        {desc && <div className="text-[9px] text-slate-400">{desc}</div>}
+      </div>
+    );
+
+    return (
+      <div className="space-y-5">
+        {/* Tab 切换 */}
+        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
+          {(['ai', 'data', 'valuation'] as const).map(tab => (
+            <button key={tab} onClick={() => setSettingsTab(tab)}
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${settingsTab === tab ? 'tab-pill-active' : 'tab-pill-inactive'}`}>
+              {tab === 'ai' ? '🤖 AI' : tab === 'data' ? '📊 数据' : '📐 估值模型'}
+            </button>
+          ))}
+        </div>
+
+        {/* AI 设置 */}
+        {settingsTab === 'ai' && (
+          <div className="space-y-5">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">AI 服务商</label>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(PROVIDERS).map(([id, p]) => (
+                  <button key={id}
+                    onClick={() => setConfig({ ...config, provider: id, apiUrl: config.apiUrl === '' || Object.values(PROVIDERS).some(prov => prov.url === config.apiUrl) ? p.url : config.apiUrl, model: p.model })}
+                    className={`p-3 rounded-xl text-left transition-all ${config.provider === id ? 'border-2 border-brand-500 bg-brand-50' : 'border border-slate-200/80 bg-surface'}`}>
+                    <div className={`text-sm font-bold ${config.provider === id ? 'text-brand-700' : 'text-slate-700'}`}>{p.name}</div>
+                    <div className="text-[10px] text-slate-400">{p.model}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">API 地址</label>
+                <input className="input-field" value={config.apiUrl} placeholder={PROVIDERS[config.provider]?.url} onChange={e => setConfig({ ...config, apiUrl: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">API Key</label>
+                <input type="password" className="input-field" placeholder="sk-xxxxxxxx" value={config.apiKey} onChange={e => setConfig({ ...config, apiKey: e.target.value })} />
+                <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><AlertCircle size={10} /> 仅保存在本地浏览器</p>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">模型名称</label>
+                <input className="input-field" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })} />
+              </div>
+            </div>
+            <button onClick={() => { setConfig(DEFAULT_CONFIG); localStorage.removeItem('iv_cfg'); }}
+              className="btn-secondary w-full py-3">恢复 AI 默认设置</button>
+          </div>
+        )}
+
+        {/* 数据设置 */}
+        {settingsTab === 'data' && (
+          <div className="space-y-4">
+            <div className="p-4 bg-slate-50 rounded-2xl space-y-2">
+              <div className="text-[10px] font-bold text-slate-400 uppercase">数据来源</div>
+              <div className="text-xs text-slate-600">实时行情 & 财务数据来自东方财富，每 10 秒自动刷新。</div>
+            </div>
+            <button onClick={() => setConfirmDialog({ title: '恢复公司数据', message: '将清除所有自定义公司，恢复初始状态。', onConfirm: () => { handleRestoreDefaults(); setConfirmDialog(null); } })}
+              className="btn-danger w-full py-3 flex items-center justify-center gap-2">
+              <Trash2 size={15} /> 恢复默认公司数据
+            </button>
+            <button onClick={handleRestoreDefaultIndices}
+              className="w-full py-3 flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 text-amber-600 font-bold rounded-2xl">
+              <RotateCcw size={15} /> 恢复默认指数数据
+            </button>
+          </div>
+        )}
+
+        {/* 估值模型设置 */}
+        {settingsTab === 'valuation' && (
+          <div className="space-y-5">
+            {/* 预设方案 */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">预设方案</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.entries(VALUATION_PRESETS) as [PresetName, typeof VALUATION_PRESETS[PresetName]][]).map(([key, preset]) => (
+                  <button key={key} onClick={() => applyPreset(key)}
+                    className={`p-3 rounded-xl text-left transition-all ${activePreset === key ? 'border-2 border-indigo-500 bg-indigo-50' : 'border border-slate-200/80 bg-surface'}`}>
+                    <div className={`text-sm font-bold ${activePreset === key ? 'text-indigo-700' : 'text-slate-700'}`}>{preset.name}</div>
+                    <div className="text-[9px] text-slate-400 mt-0.5">{preset.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {activePreset === null && <div className="text-[10px] text-amber-500 mt-2 font-medium">⚠️ 自定义参数</div>}
+            </div>
+
+            {/* DCF 参数 */}
+            <div className="card-elevated p-4 space-y-3">
+              <h3 className="text-xs font-bold text-indigo-600">① DCF 现金流折现</h3>
+              <Slider label="无风险利率 Rf" value={valuationConfig.dcf.rf} min={0.01} max={0.06} step={0.005} unit="%" onChange={v => updateDCF('rf', v)} desc="10 年期国债收益率" />
+              <Slider label="股权风险溢价 ERP" value={valuationConfig.dcf.erp} min={0.03} max={0.10} step={0.005} unit="%" onChange={v => updateDCF('erp', v)} desc="股票相对无风险资产的额外回报" />
+              <Slider label="永续增长率 g" value={valuationConfig.dcf.terminalGrowth} min={0.01} max={0.05} step={0.005} unit="%" onChange={v => updateDCF('terminalGrowth', v)} desc="长期名义 GDP 增速" />
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-600">预测年数</span>
+                <div className="flex gap-1">
+                  {[5, 8, 10].map(y => (
+                    <button key={y} onClick={() => updateDCF('projectionYears', y)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold ${valuationConfig.dcf.projectionYears === y ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {y}年
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* PE 相对估值参数 */}
+            <div className="card-elevated p-4 space-y-3">
+              <h3 className="text-xs font-bold text-indigo-600">② PE 相对估值</h3>
+              <Slider label="ROE 基准值" value={valuationConfig.pe.roeBase} min={0.08} max={0.25} step={0.01} unit="%" onChange={v => updatePE('roeBase', v)} desc="ROE 达到此值可享行业平均 PE" />
+              <Slider label="行业 PE 权重" value={valuationConfig.pe.industryWeight} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updatePE('industryWeight', v)} />
+              <Slider label="历史 PE 权重" value={valuationConfig.pe.historicalWeight} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updatePE('historicalWeight', v)} />
+              <Slider label="增长权重 (PEG)" value={valuationConfig.pe.growthWeight} min={0.1} max={0.5} step={0.05} unit="" onChange={v => updatePE('growthWeight', v)} />
+            </div>
+
+            {/* Gordon 参数 */}
+            <div className="card-elevated p-4 space-y-3">
+              <h3 className="text-xs font-bold text-indigo-600">③ Gordon 股利折现</h3>
+              <Slider label="增长率上限" value={valuationConfig.gordon.maxGrowthRate} min={0.03} max={0.20} step={0.01} unit="%" onChange={v => updateGordon('maxGrowthRate', v)} desc="股利永续增长率上限" />
+              <Slider label="默认分红比例" value={valuationConfig.gordon.defaultPayoutRatio} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updateGordon('defaultPayoutRatio', v)} desc="无数据时的分红比例假设" />
+            </div>
+
+            <button onClick={() => applyPreset('neutral')} className="btn-secondary w-full py-3">恢复默认参数</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={`min-h-screen bg-surface pb-24 ${darkMode ? 'text-slate-100' : ''}`}>
       {/* Top Bar */}
@@ -2892,14 +3078,15 @@ export default function App() {
              view === 'ai' ? 'AI 助手' : 
              view === 'index' ? '指数详情' : 
              view === 'index_list' ? '指数行情' :
-             view === 'index_detail' ? '指数详情' : '自选股'}
+             view === 'index_detail' ? '指数详情' :
+             view === 'settings' ? '设置' : '自选股'}
           </h1>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
             {darkMode ? <Sun size={19} strokeWidth={2} /> : <Moon size={19} strokeWidth={2} />}
           </button>
-          <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
+          <button onClick={() => navigate('settings')} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
             <Settings size={19} strokeWidth={2} />
           </button>
         </div>
@@ -2940,6 +3127,7 @@ export default function App() {
             )}
             {view === 'ai' && renderAI()}
             {view === 'fav' && renderFav()}
+            {view === 'settings' && renderSettings()}
             {view === 'index' && renderIndex(navArgs[0], navArgs[1])}
             {view === 'index_list' && renderIndexList()}
             {view === 'index_detail' && (
@@ -2980,130 +3168,8 @@ export default function App() {
         ))}
       </nav>
 
-      {/* Settings Modal */}
+      {/* 确认弹窗 */}
       <AnimatePresence>
-        {showSettings && (
-          <div className="fixed inset-0 z-[100] flex items-end justify-center">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowSettings(false)}
-              className="absolute inset-0 modal-overlay"
-            />
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-              className="relative w-full max-w-lg modal-sheet p-6 pb-[calc(24px+env(safe-area-inset-bottom))]"
-            >
-              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
-              <h2 className="text-lg font-extrabold text-slate-900 mb-6 flex items-center gap-2">
-                <Settings className="text-brand-500" size={20} /> 设置
-              </h2>
-              
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">AI 服务商</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Object.entries(PROVIDERS).map(([id, p]) => (
-                      <button
-                        key={id}
-                        onClick={() => setConfig({ 
-                          ...config, 
-                          provider: id, 
-                          apiUrl: config.apiUrl === '' || Object.values(PROVIDERS).some(prov => prov.url === config.apiUrl) ? p.url : config.apiUrl, 
-                          model: p.model 
-                        })}
-                        className={`p-3 rounded-xl text-left transition-all duration-200 ${
-                          config.provider === id 
-                            ? 'border-2 border-brand-500 bg-brand-50 shadow-glow-sm' 
-                            : 'border border-slate-200/80 bg-surface hover:border-slate-300'
-                        }`}
-                      >
-                        <div className={`text-sm font-bold ${config.provider === id ? 'text-brand-700' : 'text-slate-700'}`}>{p.name}</div>
-                        <div className="text-[10px] text-slate-400 font-medium mt-0.5">{p.model}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">API 地址</label>
-                    <input
-                      className="input-field"
-                      value={config.apiUrl}
-                      placeholder={PROVIDERS[config.provider]?.url || "https://api.example.com"}
-                      onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">API Key</label>
-                    <input
-                      type="password"
-                      className="input-field"
-                      placeholder="sk-xxxxxxxx"
-                      value={config.apiKey}
-                      onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                    />
-                    <p className="text-[10px] text-slate-400 mt-2 ml-0.5 flex items-center gap-1">
-                      <AlertCircle size={10} /> 你的 API 密钥仅保存在本地浏览器中
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">模型名称</label>
-                    <input
-                      className="input-field"
-                      value={config.model}
-                      onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 space-y-3">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">数据管理</label>
-                  <button
-                    onClick={() => setConfirmDialog({
-                      title: '恢复公司数据',
-                      message: '将清除所有自定义添加和删除的公司，恢复初始状态。',
-                      onConfirm: () => { handleRestoreDefaults(); setConfirmDialog(null); }
-                    })}
-                    className="btn-danger w-full py-3 flex items-center justify-center gap-2"
-                  >
-                    <Trash2 size={15} />
-                    恢复默认公司数据
-                  </button>
-                  <button
-                    onClick={handleRestoreDefaultIndices}
-                    className="w-full py-3 flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 text-amber-600 font-bold rounded-2xl active:scale-[0.98] transition-transform"
-                  >
-                    <RotateCcw size={15} />
-                    恢复默认指数数据
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button
-                    onClick={() => { setConfig(DEFAULT_CONFIG); localStorage.removeItem('iv_cfg'); }}
-                    className="btn-secondary py-3"
-                  >
-                    恢复默认
-                  </button>
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="btn-primary py-3"
-                  >
-                    完成
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {/* 确认弹窗 */}
         {confirmDialog && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
             <motion.div
