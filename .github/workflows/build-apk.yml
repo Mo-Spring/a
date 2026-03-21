@@ -39,11 +39,20 @@ jobs:
     - name: Set Custom Icon
       run: |
         sudo apt-get install -y librsvg2-bin
+        # 生成各分辨率的 ic_launcher.png
         rsvg-convert -w 192 -h 192 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
         rsvg-convert -w 144 -h 144 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
         rsvg-convert -w 96 -h 96 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
         rsvg-convert -w 72 -h 72 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
         rsvg-convert -w 48 -h 48 resources/icons/ic_launcher.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+        # 生成圆形图标
+        cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+        cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+        cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+        cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+        cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+        # 删除自适应图标配置，强制使用传统 ic_launcher.png（避免默认前景层覆盖自定义图标）
+        rm -rf android/app/src/main/res/mipmap-anydpi-v26
 
     - name: Build APK
       run: |
