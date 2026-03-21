@@ -1,1 +1,10 @@
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 白底圆角方形 -->
+  <rect width="512" height="512" rx="108" fill="#ffffff"/>
+  <!-- 外圆环 -->
+  <circle cx="256" cy="256" r="174" fill="#b8860b"/>
+  <circle cx="256" cy="256" r="139" fill="#ffffff"/>
+  <!-- 内方环（圆角25px） -->
+  <rect x="192" y="192" width="128" height="128" rx="25" fill="#b8860b"/>
+  <rect x="210" y="210" width="92" height="92" rx="7" fill="#ffffff"/>
+</svg>
