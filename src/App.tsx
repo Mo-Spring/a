@@ -1273,15 +1273,15 @@ export default function App() {
       </div>
 
       {/* Filter Pills */}
-      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card overflow-x-auto">
         {(['all', 'low', 'mid', 'high'] as const).map(t => (
           <button
             key={t}
             onClick={() => setFilter(t)}
-            className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+            className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all duration-200 whitespace-nowrap ${
               filter === t 
                 ? 'bg-slate-900 text-white shadow-md' 
-                : 'bg-white text-slate-500 border border-slate-200/60'
+                : 'text-slate-400'
             }`}
           >
             {t === 'all' ? '全部' : t === 'low' ? '低估' : t === 'mid' ? '适中' : '高估'}
@@ -2181,56 +2181,68 @@ export default function App() {
             const status = pePct < 30 ? 'low' : pePct > 70 ? 'high' : 'mid';
 
             return (
-              <div
+              <motion.div
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
                 key={idx.c}
                 onClick={() => navigate('index_detail', idx)}
-                className="card-interactive p-4"
+                className="card-interactive p-4 relative overflow-hidden"
               >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-bold text-slate-800">{idx.n}</div>
-                      {iv?.evaType && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                          iv.evaType === 'low' ? 'bg-emerald-50 text-emerald-600' :
-                          iv.evaType === 'high' ? 'bg-red-50 text-red-600' :
-                          'bg-amber-50 text-amber-600'
-                        }`}>
-                          {iv.evaType === 'low' ? '低估' : iv.evaType === 'high' ? '高估' : '适中'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-mono">{idx.c}</div>
-                    <div className="flex gap-3 mt-1">
-                      {iv?.pePct !== undefined && (
-                        <div>
-                          <div className="text-[9px] text-slate-400 font-bold">PE%</div>
-                          <div className="text-xs font-bold text-slate-700">{(iv.pePct * 100).toFixed(0)}%</div>
-                        </div>
-                      )}
-                      {iv?.roe && (
-                        <div>
-                          <div className="text-[9px] text-slate-400 font-bold">ROE</div>
-                          <div className="text-xs font-bold text-slate-700">{(iv.roe * 100).toFixed(1)}%</div>
-                        </div>
-                      )}
-                      {iv?.dy && (
-                        <div>
-                          <div className="text-[9px] text-slate-400 font-bold">股息率</div>
-                          <div className="text-xs font-bold text-slate-700">{(iv.dy * 100).toFixed(1)}%</div>
-                        </div>
-                      )}
-                    </div>
+                {/* Header: name + change + valuation badge */}
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
+                    {bd?.cp && (
+                      <span className={`text-[10px] font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {parseFloat(bd.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-slate-800">{bd?.p || '—'}</div>
-                      {bd?.cp && (
-                        <div className={`text-[10px] font-bold ${parseFloat(bd.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                          {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
-                        </div>
-                      )}
+                  {iv?.evaType && (
+                    <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
+                      {evText(iv.evaType)}
+                    </span>
+                  )}
+                </div>
+
+                {/* Stats grid: PE / PB / 股息率 */}
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">PE</div>
+                    <div className="stat-value">{iv?.pe !== undefined ? iv.pe.toFixed(2) : bd?.pe || '—'}</div>
+                  </div>
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">PB</div>
+                    <div className="stat-value">{iv?.pb !== undefined ? iv.pb.toFixed(2) : bd?.pb || '—'}</div>
+                  </div>
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">股息率</div>
+                    <div className="stat-value">{iv?.dy !== undefined ? `${(iv.dy * 100).toFixed(2)}%` : '—'}</div>
+                  </div>
+                </div>
+
+                {/* PE percentile progress bar */}
+                {iv?.pePct !== undefined && (
+                  <div className="flex items-center gap-2 text-[10px] mb-2">
+                    <span className="text-slate-400 font-bold w-10">PE%位</span>
+                    <div className="progress-bar flex-1">
+                      <div
+                        className="progress-bar-fill"
+                        style={{
+                          width: `${Math.min(iv.pePct * 100, 100)}%`,
+                          background: iv.pePct < 0.3 ? 'linear-gradient(90deg, #10b981, #34d399)' : iv.pePct < 0.7 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)'
+                        }}
+                      />
                     </div>
+                    <span className={`w-8 text-right font-bold tabular-nums ${pColor(iv.pePct * 100)}`}>{(iv.pePct * 100).toFixed(0)}%</span>
+                  </div>
+                )}
+
+                {/* Footer: code + actions */}
+                <div className="flex justify-between items-center mt-1">
+                  <div className="text-[10px] text-slate-400 font-mono">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '国外'}</div>
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2240,22 +2252,22 @@ export default function App() {
                           localStorage.setItem('iv_indices', JSON.stringify(newIndices));
                         }
                       }}
-                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                      className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} />
                     </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleFav(idx.c, 'index', e);
                       }}
-                      className="p-2 text-amber-400 transition-colors"
+                      className="p-1.5 text-amber-400 transition-colors"
                     >
-                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={16} /> : <Star size={16} />}
+                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={14} /> : <Star size={14} />}
                     </button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>
