@@ -100,34 +100,38 @@ async function fetchEastmoneyQuote(code: string, market: 'A' | 'HK'): Promise<Pa
     const secid = `${mk}.${code}`;
 
     const cbName = `em_quote_${code}_${Date.now()}`;
-    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f116,f117,f162,f167,f168,f169,f170,f171,f173,f177,f183,f184,f185,f186,f187,f188,f292&cb=${cbName}`;
+    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f170,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138&cb=${cbName}`;
 
     const data = await jsonp(url, cbName);
     const d = data?.data;
     if (!d) return null;
 
-    // 东方财富价格字段：大部分 *100，需除以对应精度
+    const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
+    const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
     const priceDiv = 100;
-    const price = d.f43 != null ? d.f43 / priceDiv : 0;
+    const price = d.f2 != null ? d.f2 / priceDiv : 0;
 
     return {
       code,
       name: d.f58 || '',
       price,
-      changePct: d.f170 != null ? d.f170 / 100 : 0,
-      pe: d.f162 != null && d.f162 > 0 ? d.f162 / 100 : 0,
-      pb: d.f167 != null && d.f167 > 0 ? d.f167 / 100 : 0,
-      ps: d.f173 != null && d.f173 > 0 ? d.f173 / 100 : 0,
-      dy: d.f177 != null ? d.f177 / 100 : 0,
-      roe: d.f183 != null ? d.f183 / 100 : 0,
-      roa: d.f184 != null ? d.f184 / 100 : 0,
-      eps: d.f116 != null ? d.f116 / 100 : 0,
-      bvps: d.f23 != null ? d.f23 / 100 : 0,
-      mcap: d.f116 != null && d.f57 != null ? d.f57 / 100000000 : 0,
-      fcap: d.f117 != null ? d.f117 / 100000000 : 0,
-      grossMargin: d.f185 != null ? d.f185 / 100 : 0,
-      netMargin: d.f186 != null ? d.f186 / 100 : 0,
-      totalDebt: d.f52 != null ? d.f52 / 100 : 0,
+      changePct: val(d.f170, 100) || val(d.f3, 100) || 0,
+      pe: valPos(d.f162, 100) || valPos(d.f9, 100) || 0,
+      pb: valPos(d.f167, 100) || valPos(d.f23, 100) || 0,
+      ps: valPos(d.f188, 100) || 0,
+      dy: valPos(d.f177, 100) || 0,
+      roe: val(d.f183, 100) || val(d.f37) || 0,
+      roa: val(d.f184, 100) || 0,
+      eps: valPos(d.f168, 100) || 0,
+      bvps: valPos(d.f23, 100) || 0,
+      mcap: valPos(d.f20, 100000000) || valPos(d.f57, 100000000) || 0,
+      fcap: valPos(d.f117, 100000000) || 0,
+      grossMargin: val(d.f185, 100) || 0,
+      netMargin: val(d.f186, 100) || 0,
+      totalDebt: val(d.f52, 100) || 0,
+      revenueGrowth: val(d.f98, 100) || 0,
+      netIncomeGrowth: val(d.f99, 100) || 0,
+      dividendPerShare: val(d.f69) || 0,
     };
   } catch (e) {
     console.error(`[fetchEastmoneyQuote] Error for ${code}:`, e);
