@@ -580,7 +580,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [livePrice, setLivePrice] = useState<{ 
     p: string; ch: string; cp: string; up: boolean;
-    pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string;
+    pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string; fcap?: string;
+    roe?: string; turn?: string; gross?: string; debt?: string; rev?: string;
   } | null>(null);
   const [customCompanies, setCustomCompanies] = useState<any[]>(() => JSON.parse(localStorage.getItem('iv_custom_comps') || '[]'));
   const [deletedCompanies, setDeletedCompanies] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_deleted_comps') || '[]'));
@@ -1177,8 +1178,14 @@ export default function App() {
             const dy = d.data.f173 !== '-' && d.data.f173 !== undefined ? (d.data.f173 / 100).toFixed(2) : undefined;
             const ps = d.data.f188 !== '-' && d.data.f188 !== undefined && d.data.f188 > 0 ? (d.data.f188 / 100).toFixed(2) : undefined;
             const mcap = d.data.f116 !== '-' && d.data.f116 !== undefined ? (d.data.f116 / 100000000).toFixed(2) : undefined;
+            const fcap = d.data.f117 !== '-' && d.data.f117 !== undefined ? (d.data.f117 / 100000000).toFixed(2) : undefined;
+            const roe = d.data.f37 !== '-' && d.data.f37 !== undefined && d.data.f37 > 0 ? (d.data.f37 / 100).toFixed(2) : undefined;
+            const turn = d.data.f8 !== '-' && d.data.f8 !== undefined ? (d.data.f8 / 100).toFixed(2) : undefined;
+            const gross = d.data.f49 !== '-' && d.data.f49 !== undefined ? (d.data.f49 / 100).toFixed(2) : undefined;
+            const debt = d.data.f57 !== '-' && d.data.f57 !== undefined ? (d.data.f57 / 100).toFixed(2) : undefined;
+            const rev = d.data.f40 !== '-' && d.data.f40 !== undefined && d.data.f40 > 0 ? (d.data.f40 / 100000000).toFixed(2) : undefined;
 
-            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap });
+            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap, fcap, roe, turn, gross, debt, rev });
           }
           delete (window as any)[cbName];
           const scriptEl = document.getElementById(cbName);
@@ -1187,7 +1194,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f9,f23,f60,f169&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f117,f9,f23,f60,f169,f37,f8,f49,f57,f40&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.error('Failed to fetch price');
@@ -1643,16 +1650,17 @@ export default function App() {
     const currentPE = livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || c.pe || 0);
     const currentPB = livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || c.pb || 0);
     const currentDY = livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || c.dy || 0);
+    const currentROE = livePrice?.roe && !isNaN(parseFloat(livePrice.roe)) && parseFloat(livePrice.roe) > 0 ? parseFloat(livePrice.roe) : (c.roe || 0);
 
     const rf = 0.05, erp = 0.06, beta = 1, wacc = rf + beta * erp;
-    const growth = c.roe > 20 ? 0.08 : c.roe > 15 ? 0.06 : c.roe > 10 ? 0.04 : 0.02;
+    const growth = currentROE > 20 ? 0.08 : currentROE > 15 ? 0.06 : currentROE > 10 ? 0.04 : 0.02;
     const tg = 0.025, yrs = 10, eps = currentPE > 0 ? (100 / currentPE) : 0;
     let dcf = 0;
     for (let y = 1; y <= yrs; y++) dcf += eps * Math.pow(1 + growth, y) / Math.pow(1 + wacc, y);
     dcf += (eps * Math.pow(1 + growth, yrs) * (1 + tg)) / (wacc - tg) / Math.pow(1 + wacc, yrs);
     const dcfPE = eps > 0 ? (dcf / eps) : 0;
-    const indPE = ind.pe || 20, peFairPE = indPE * (c.roe / 15);
-    const gROE = c.roe / 100, gG = Math.min(gROE * 0.3, 0.04), pbFair = gROE > 0 ? ((gROE - gG) / (wacc - gG)) : 0;
+    const indPE = ind.pe || 20, peFairPE = indPE * (currentROE / 15);
+    const gROE = currentROE / 100, gG = Math.min(gROE * 0.3, 0.04), pbFair = gROE > 0 ? ((gROE - gG) / (wacc - gG)) : 0;
     const gordonPE = gROE > 0 ? (pbFair / gROE) : 0;
     const fairPE = (dcfPE + peFairPE + gordonPE) / 3;
     const margin = currentPE > 0 ? ((fairPE - currentPE) / currentPE * 100) : 0;
@@ -1663,7 +1671,7 @@ export default function App() {
     else if (margin > -15) { vc = 'bg-amber-50 text-amber-600'; vt = `合理 ${margin >= 0 ? '+' : ''}${margin.toFixed(0)}%`; }
     else { vc = 'bg-red-50 text-red-600'; vt = `高估 ${margin.toFixed(0)}%`; }
 
-    const rg = getGrade(c.roe, [25, 20, 15, 10]);
+    const rg = getGrade(currentROE, [25, 20, 15, 10]);
     const dg = getGrade(currentDY, [5, 3, 2, 1]);
     const pg = currentPE > 0 ? getGrade(100 / currentPE, [25, 15, 10, 5]) : 'N/A';
     const bg = getGrade(100 / currentPB, [100, 50, 25, 10]);
@@ -1744,10 +1752,13 @@ export default function App() {
             {[
               { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe || c.pe || '—' },
               { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb || c.pb },
-              { l: 'ROE', v: `${c.roe}%` },
+              { l: 'ROE', v: `${currentROE}%` },
               { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || c.dy}%` },
               { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || c.ps || '—' },
               { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
+              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : '—' },
+              { l: '换手率', v: livePrice?.turn ? `${livePrice.turn}%` : '—' },
+              { l: '毛利率', v: livePrice?.gross ? `${livePrice.gross}%` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
                 <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
@@ -1755,6 +1766,34 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          {/* 经营质量 */}
+          {(livePrice?.debt || livePrice?.rev) && (
+            <div className="grid grid-cols-2 gap-2">
+              {livePrice?.rev && (
+                <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                  <div className="w-8 h-8 rounded-lg bg-sky-50 flex items-center justify-center text-sky-500 flex-shrink-0">
+                    <TrendingUp size={16} />
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-400 font-bold">营业收入</div>
+                    <div className="text-sm font-bold text-slate-700 tabular-nums">{livePrice.rev}亿</div>
+                  </div>
+                </div>
+              )}
+              {livePrice?.debt && (
+                <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${parseFloat(livePrice.debt) > 60 ? 'bg-red-50 text-red-500' : parseFloat(livePrice.debt) > 40 ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
+                    <AlertCircle size={16} />
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-400 font-bold">资产负债率</div>
+                    <div className={`text-sm font-bold tabular-nums ${parseFloat(livePrice.debt) > 60 ? 'text-red-500' : parseFloat(livePrice.debt) > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{livePrice.debt}%</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-4 gap-2">
             {[
@@ -1811,7 +1850,7 @@ export default function App() {
           )}
 
           <div className="p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-xl text-xs text-slate-600 leading-relaxed">
-            {c.roe >= 20 ? '✅ ROE ' + c.roe + '% 优秀 ' : c.roe >= 10 ? '⚠️ ROE ' + c.roe + '% 中等 ' : '❌ ROE 仅 ' + c.roe + '% '}
+            {currentROE >= 20 ? '✅ ROE ' + currentROE + '% 优秀 ' : currentROE >= 10 ? '⚠️ ROE ' + currentROE + '% 中等 ' : '❌ ROE 仅 ' + currentROE + '% '}
             {currentDY >= 3 ? '✅ 股息率 ' + currentDY + '% ' : 'ℹ️ 股息率 ' + currentDY + '% '}
             {currentPE > 0 && currentPE <= 15 ? '✅ PE 偏低 ' : currentPE > 0 && currentPE <= 30 ? 'ℹ️ PE 适中 ' : '⚠️ PE 偏高 '}
             {currentPB < 1 ? '✅ PB 破净 ' : currentPB <= 2 ? 'ℹ️ PB 合理 ' : '⚠️ PB 偏高 '}
