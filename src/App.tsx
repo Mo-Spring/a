@@ -49,6 +49,9 @@ interface SearchViewProps {
   handleAiAddCompany: () => void;
   isAddingCompany: boolean;
   aiAddError: string | null;
+  handleAiAddIndex: () => void;
+  isAddingIndex: boolean;
+  aiIndexError: string | null;
 }
 
 const SearchView = ({
@@ -63,7 +66,10 @@ const SearchView = ({
   setIndexMarket,
   handleAiAddCompany,
   isAddingCompany,
-  aiAddError
+  aiAddError,
+  handleAiAddIndex,
+  isAddingIndex,
+  aiIndexError
 }: SearchViewProps) => {
   const [searchType, setSearchType] = useState<'stock' | 'index'>('stock');
   const [remoteResults, setRemoteResults] = useState<any[]>([]);
@@ -252,37 +258,21 @@ const SearchView = ({
                 <div className="text-indigo-600 text-xs font-bold">点击添加</div>
               </div>
             ))}
-            {searchQuery.length > 0 && (
-              <div className="card p-6 text-center">
-                {remoteResults.length === 0 && (
-                  <div className="text-slate-400 text-sm mb-4">未找到相关指数，您可以手动添加</div>
-                )}
+            {searchQuery.length > 0 && remoteResults.length === 0 && (
+              <div className="mt-4 space-y-2">
                 <button
-                  onClick={() => {
-                    const q = searchQuery.trim();
-                    let m: 'A' | 'HK' | 'GLOBAL' = 'GLOBAL';
-                    let mk = '100';
-                    if (/^\d{6}$/.test(q)) {
-                      m = 'A';
-                      mk = q.startsWith('399') || q.startsWith('159') ? '0' : '1';
-                    } else if (['HSI', 'HSCEI', 'HSTECH'].includes(q) || q.startsWith('HK')) {
-                      m = 'HK';
-                      mk = '100';
-                    }
-                    const newIdx = { c: q, n: `自定义指数 ${q}`, m, mk };
-                    if (indices.find(i => i.c === q)) return;
-                    const newIndices = [...indices, newIdx];
-                    setIndices(newIndices);
-                    localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-                    setSearchQuery('');
-                    setRemoteResults([]);
-                    setIndexMarket(m);
-                    navigate('index_detail', newIdx);
-                  }}
-                  className="btn-primary px-6 py-2.5 rounded-xl"
+                  onClick={handleAiAddIndex}
+                  disabled={isAddingIndex}
+                  className="w-full bg-brand-50 border border-brand-100 text-brand-600 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50"
                 >
-                  手动添加指数: {searchQuery}
+                  {isAddingIndex ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
+                  {isAddingIndex ? '正在让 AI 识别并添加...' : `找不到？让 AI 自动添加 "${searchQuery}"`}
                 </button>
+                {aiIndexError && (
+                  <div className="text-center text-xs text-red-500 font-medium">
+                    {aiIndexError}
+                  </div>
+                )}
               </div>
             )}
             {searchQuery.length === 0 && remoteResults.length === 0 && (
@@ -587,6 +577,8 @@ export default function App() {
   const [deletedCompanies, setDeletedCompanies] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_deleted_comps') || '[]'));
   const [isAddingCompany, setIsAddingCompany] = useState(false);
   const [aiAddError, setAiAddError] = useState<string | null>(null);
+  const [isAddingIndex, setIsAddingIndex] = useState(false);
+  const [aiIndexError, setAiIndexError] = useState<string | null>(null);
   const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; p?: string; cp?: string }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -1912,6 +1904,55 @@ export default function App() {
     }
   };
 
+  const handleAiAddIndex = async () => {
+    if (!searchQuery) return;
+    if (!config.apiKey && !(config.provider === 'gemini' && process.env.GEMINI_API_KEY)) {
+      setAiIndexError('请先在设置中配置 AI API Key 才能使用自动添加功能');
+      return;
+    }
+    setIsAddingIndex(true);
+    setAiIndexError(null);
+    try {
+      const prompt = `用户想添加一个指数，输入是："${searchQuery}"。
+      请识别这个指数，并返回它的基本信息。
+      必须返回一个合法的 JSON 对象，不要包含任何 markdown 标记（如 \`\`\`json），直接返回 JSON 字符串。
+      JSON 格式如下：
+      {
+        "c": "指数代码(如 000300 或 HSI 或 INX)",
+        "n": "指数全称(如 沪深300、恒生指数)",
+        "m": "A" 或 "HK" 或 "GLOBAL",
+        "mk": "东方财富市场代码(A股: 上交所1 深交所0, 港股: 116, 美股/全球: 100)"
+      }`;
+
+      let text = await getAIResponse(prompt, config, []);
+
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        text = match[0];
+      }
+      const newIdx = JSON.parse(text);
+      newIdx.c = (newIdx.c || '').trim();
+      newIdx.n = (newIdx.n || '').trim();
+      newIdx.m = newIdx.m || 'A';
+      newIdx.mk = newIdx.mk || '1';
+
+      if (!indices.find(i => i.c === newIdx.c)) {
+        const newIndices = [...indices, newIdx];
+        setIndices(newIndices);
+        localStorage.setItem('iv_indices', JSON.stringify(newIndices));
+      }
+
+      setSearchQuery('');
+      setIndexMarket(newIdx.m);
+      navigate('index_detail', newIdx);
+    } catch (err) {
+      console.error(err);
+      setAiIndexError('添加失败，请重试或检查输入是否正确。');
+    } finally {
+      setIsAddingIndex(false);
+    }
+  };
+
 
   const renderAI = () => {
     const activeConv = aiConversations.find(c => c.id === activeAiConvId);
@@ -2623,6 +2664,9 @@ export default function App() {
                 handleAiAddCompany={handleAiAddCompany}
                 isAddingCompany={isAddingCompany}
                 aiAddError={aiAddError}
+                handleAiAddIndex={handleAiAddIndex}
+                isAddingIndex={isAddingIndex}
+                aiIndexError={aiIndexError}
               />
             )}
             {view === 'ai' && renderAI()}
