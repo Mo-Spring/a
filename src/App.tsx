@@ -758,7 +758,12 @@ export default function App() {
 
       try {
         // Capacitor: 直接访问 danjuanfunds.com；Web: 走 /djapi 代理
-        const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`);
+        const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            'Referer': 'https://danjuanfunds.com/',
+          },
+        });
         const data = await resp.json();
         if (data.data && data.data.items && data.data.items.length > 0) {
           applyData(data.data.items);
