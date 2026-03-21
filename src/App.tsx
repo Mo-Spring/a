@@ -305,7 +305,16 @@ interface IndexDetailViewProps {
 
 const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndices }: IndexDetailViewProps) => {
   const bd = batchData[idx.c];
-  const iv = indexVal[idx.c];
+  const djIv = indexVal[idx.c];
+  // Merge: prefer indexVal (danjuan/percentile), fallback to batchData for PE/PB/DY
+  const iv = djIv || bd ? {
+    pe: djIv?.pe || (bd?.pe && bd.pe > 0 ? bd.pe : undefined),
+    pb: djIv?.pb || (bd?.pb && bd.pb > 0 ? bd.pb : undefined),
+    dy: djIv?.dy || (bd?.dy && bd.dy > 0 ? bd.dy / 100 : undefined),  // bd.dy is raw % (e.g. 2.87), convert to decimal
+    pePct: djIv?.pePct,
+    pbPct: djIv?.pbPct,
+    source: djIv?.source || (bd?.pe ? 'batch' : undefined),
+  } : undefined;
 
   return (
     <div className="space-y-4">
