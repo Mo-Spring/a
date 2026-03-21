@@ -1703,6 +1703,16 @@ export default function App() {
                     return p ? `¥${p}` : '加载中...';
                   })()}
                 </span>
+                {(() => {
+                  const cp = livePrice?.cp || batchData[tCode]?.cp;
+                  if (!cp || cp === '—') return null;
+                  const val = parseFloat(cp);
+                  return (
+                    <span className={`text-sm font-bold tabular-nums ${val >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {val >= 0 ? '+' : ''}{cp}%
+                    </span>
+                  );
+                })()}
               </div>
             </div>
 
