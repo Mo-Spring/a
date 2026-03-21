@@ -1564,15 +1564,6 @@ export default function App() {
                     return p ? `¥${p}` : '加载中...';
                   })()}
                 </span>
-                {(() => {
-                  const cp = (livePrice && livePrice.cp !== '—') ? livePrice.cp : batchData[tCode]?.cp;
-                  const up = cp ? parseFloat(cp) >= 0 : false;
-                  return cp ? (
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${up ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                      {up ? '+' : ''}{cp}%
-                    </span>
-                  ) : null;
-                })()}
               </div>
             </div>
 
@@ -1613,11 +1604,6 @@ export default function App() {
                 <div className="text-sm font-bold text-slate-700">{m.v}</div>
               </div>
             ))}
-          </div>
-
-          <div className="bg-slate-50 rounded-xl p-2 text-center">
-            <div className="text-[9px] text-slate-400 font-bold uppercase">WACC</div>
-            <div className="text-sm font-bold text-slate-700">{`${(wacc * 100).toFixed(1)}%`}</div>
           </div>
 
           <div className="grid grid-cols-4 gap-2">
