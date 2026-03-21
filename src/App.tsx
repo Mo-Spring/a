@@ -630,10 +630,11 @@ export default function App() {
         const cbName = `jsonp_batch_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         
         const timeoutId = setTimeout(() => {
+          console.warn(`[Batch] JSONP timeout for chunk ${i/chunkSize}`);
           delete (window as any)[cbName];
           const scriptEl = document.getElementById(cbName);
           if (scriptEl) scriptEl.remove();
-        }, 10000);
+        }, 15000);
         
         (window as any)[cbName] = (d: any) => {
           clearTimeout(timeoutId);
@@ -675,9 +676,39 @@ export default function App() {
         script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173,f188&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
+          console.warn(`[Batch] JSONP error, trying fetch fallback for chunk ${i/chunkSize}`);
           delete (window as any)[cbName];
           const scriptEl = document.getElementById(cbName);
           if (scriptEl) scriptEl.remove();
+          // Fallback: try fetch() (works on Capacitor native, may fail on web due to CORS)
+          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173,f188`)
+            .then(r => r.json())
+            .then((d: any) => {
+              if (d?.data?.diff) {
+                setBatchData(prev => {
+                  const newData = { ...prev };
+                  d.data.diff.forEach((item: any) => {
+                    let code = item.f12;
+                    if (code === 'UDI') code = 'DJI';
+                    if (code === 'SPX') code = 'INX';
+                    if (code === 'KOSPI') code = 'KS11';
+                    if (code === 'NIFTY') code = 'NSEI';
+                    const mkId = item.f13;
+                    const pScale = mkId === 116 ? 1000 : 100;
+                    const pe = item.f162 !== '-' && item.f162 !== undefined && item.f162 > 0 ? item.f162 / 100 : (item.f9 !== '-' && item.f9 !== undefined && item.f9 > 0 ? item.f9 / 100 : undefined);
+                    const pb = item.f167 !== '-' && item.f167 !== undefined && item.f167 > 0 ? item.f167 / 100 : (item.f23 !== '-' && item.f23 !== undefined && item.f23 > 0 ? item.f23 / 100 : undefined);
+                    const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
+                    const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
+                    const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
+                    const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
+                    const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
+                    newData[code] = { pe, pb, dy, ps, mcap, p, cp };
+                  });
+                  return newData;
+                });
+              }
+            })
+            .catch(() => {});
         };
         document.head.appendChild(script);
       }
@@ -1582,6 +1613,11 @@ export default function App() {
                 <div className="text-sm font-bold text-slate-700">{m.v}</div>
               </div>
             ))}
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-2 text-center">
+            <div className="text-[9px] text-slate-400 font-bold uppercase">WACC</div>
+            <div className="text-sm font-bold text-slate-700">{`${(wacc * 100).toFixed(1)}%`}</div>
           </div>
 
           <div className="grid grid-cols-4 gap-2">
