@@ -541,7 +541,7 @@ export default function App() {
 
   // Capacitor 环境下直接访问真实 API（无 CORS 限制），Web 环境走代理
   const djApiBase = Capacitor.isNativePlatform() ? 'https://danjuanfunds.com' : '';
-  const sinaApiBase = Capacitor.isNativePlatform() ? 'https://vip.stock.finance.sina.com.cn' : '';
+  const sinaApiBase = Capacitor.isNativePlatform() ? 'https://vip.stock.finance.sina.com.cn' : '/sina-api';
 
   const getMergedIndustries = (base: Industry[], mkt: 'A' | 'HK' | 'GLOBAL') => {
     const merged = JSON.parse(JSON.stringify(base)) as Industry[];
