@@ -297,7 +297,7 @@ const SearchView = ({
 interface IndexDetailViewProps {
   idx: Index;
   batchData: Record<string, any>;
-  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>;
+  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string }>;
   setView: (view: ViewType) => void;
   toggleFav: (code: string, type: 'stock' | 'index', e?: React.MouseEvent) => void;
   favIndices: string[];
@@ -328,13 +328,25 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
       </div>
 
       <div className="card-elevated p-5 space-y-6">
+        {/* 标题区 */}
         <div className="flex justify-between items-start">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">{idx.n}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-slate-800">{idx.n}</h2>
+              {djIv?.evaType && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                  djIv.evaType === 'low' ? 'bg-emerald-50 text-emerald-600' :
+                  djIv.evaType === 'high' ? 'bg-red-50 text-red-600' :
+                  'bg-amber-50 text-amber-600'
+                }`}>
+                  {djIv.evaType === 'low' ? '低估' : djIv.evaType === 'high' ? '高估' : '适中'}
+                </span>
+              )}
+            </div>
             <div className="text-xs text-slate-400 font-mono mt-1">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '国外'}</div>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold text-slate-900">{bd?.p || '—'}</div>
+            <div className="text-2xl font-bold text-slate-900">{bd?.p || '\u2014'}</div>
             {bd?.cp && (
               <div className={`text-sm font-bold ${parseFloat(bd.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                 {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
@@ -343,33 +355,71 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
           </div>
         </div>
 
+        {/* 核心六指标 */}
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-slate-50 rounded-xl p-3 text-center">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE (TTM)</div>
-            <div className="text-base font-bold text-slate-800">{iv?.pe ? iv.pe.toFixed(2) : (bd?.pe !== undefined && bd.pe > 0 ? bd.pe : '—')}</div>
+            <div className="text-base font-bold text-slate-800">{iv?.pe ? iv.pe.toFixed(2) : '\u2014'}</div>
           </div>
           <div className="bg-slate-50 rounded-xl p-3 text-center">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB</div>
-            <div className="text-base font-bold text-slate-800">{iv?.pb ? iv.pb.toFixed(2) : (bd?.pb !== undefined && bd.pb > 0 ? bd.pb : '—')}</div>
+            <div className="text-base font-bold text-slate-800">{iv?.pb ? iv.pb.toFixed(2) : '\u2014'}</div>
           </div>
           <div className="bg-slate-50 rounded-xl p-3 text-center">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">股息率</div>
-            <div className="text-base font-bold text-slate-800">{iv?.dy ? `${(iv.dy * 100).toFixed(2)}%` : (bd?.dy !== undefined && bd.dy > 0 ? `${bd.dy}%` : '—')}</div>
+            <div className="text-base font-bold text-slate-800">{iv?.dy ? `${(iv.dy * 100).toFixed(2)}%` : '\u2014'}</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">ROE</div>
+            <div className="text-base font-bold text-slate-800">{iv?.roe ? `${(iv.roe * 100).toFixed(2)}%` : '\u2014'}</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PEG</div>
+            <div className="text-base font-bold text-slate-800">{iv?.peg ? iv.peg.toFixed(2) : '\u2014'}</div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">国债利率</div>
+            <div className="text-base font-bold text-slate-800">{iv?.bondYield ? `${(iv.bondYield * 100).toFixed(2)}%` : '\u2014'}</div>
           </div>
         </div>
 
         {iv?.source === 'computed' && (
           <div className="text-center text-[10px] text-amber-500 font-medium flex items-center justify-center gap-1">
-            <span>⚠️</span> PE/PB 为从行业成分股推算，非指数直接数据
+            <span>\u26a0\ufe0f</span> PE/PB 为从行业成分股推算，非指数直接数据
           </div>
         )}
 
+        {/* 股债利差 */}
+        {iv?.pe && iv.pe > 0 && iv?.bondYield && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+            <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mb-2">股债利差 (FED 模型)</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-indigo-600">
+                {((1 / iv.pe - iv.bondYield) * 100).toFixed(2)}%
+              </span>
+              <span className="text-xs text-indigo-400">
+                = 1/PE({(100 / iv.pe).toFixed(2)}%) &minus; 国债({(iv.bondYield * 100).toFixed(2)}%)
+              </span>
+            </div>
+            <div className={`mt-2 text-xs font-bold ${
+              (1 / iv.pe - iv.bondYield) > 0.02 ? 'text-emerald-600' :
+              (1 / iv.pe - iv.bondYield) < -0.02 ? 'text-red-600' :
+              'text-amber-600'
+            }`}>
+              {(1 / iv.pe - iv.bondYield) > 0.02 ? '股票更有吸引力' :
+               (1 / iv.pe - iv.bondYield) < -0.02 ? '债券更有吸引力' :
+               '股债均衡'}
+            </div>
+          </div>
+        )}
+
+        {/* 价值估计 */}
         {bd?.pe && bd?.pe > 0 && (
           <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
             <div>
               <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">价值估计 (基于历史均值)</div>
               <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                {bd?.p && bd?.pe ? `¥${(parseFloat(bd.p) * (15 / bd.pe)).toFixed(2)}` : '—'}
+                {bd?.p && bd?.pe ? `\u00a5${(parseFloat(bd.p) * (15 / bd.pe)).toFixed(2)}` : '\u2014'}
                 <span className="text-xs font-medium ml-1 opacity-70">合理 PE 15.0x</span>
               </div>
             </div>
@@ -379,42 +429,48 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
           </div>
         )}
 
+        {/* PE/PB 百分位 */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE 百分位 (近10年)</div>
-            <div className="text-2xl font-bold text-slate-800">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}` : (idx.pePct || '—')}%</div>
+            <div className="text-2xl font-bold text-slate-800">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}` : '\u2014'}%</div>
           </div>
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB 百分位 (近10年)</div>
-            <div className="text-2xl font-bold text-slate-800">{iv?.pbPct !== undefined ? `${(iv.pbPct * 100).toFixed(1)}` : (idx.pbPct || '—')}%</div>
+            <div className="text-2xl font-bold text-slate-800">{iv?.pbPct !== undefined ? `${(iv.pbPct * 100).toFixed(1)}` : '\u2014'}%</div>
           </div>
         </div>
 
+        {/* 整体估值水平 */}
         <div className={`rounded-2xl p-6 text-center ${
-          ((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) < 30 ? 'bg-emerald-50 border border-emerald-100' : 
-          ((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) > 70 ? 'bg-red-50 border border-red-100' : 
+          ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? 'bg-emerald-50 border border-emerald-100' : 
+          ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? 'bg-red-50 border border-red-100' : 
           'bg-amber-50 border border-amber-100'
         }`}>
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">整体估值水平</div>
           <div className={`text-3xl font-black ${
-            ((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) < 30 ? 'text-emerald-600' : 
-            ((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) > 70 ? 'text-red-600' : 
+            ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? 'text-emerald-600' : 
+            ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? 'text-red-600' : 
             'text-amber-600'
           }`}>
-            {((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) < 30 ? '低估' : ((iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50) > 70 ? '高估' : '适中'}
+            {((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? '低估' : ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? '高估' : '适中'}
           </div>
           <div className="text-xs text-slate-500 mt-2">
-            基于 PE 百分位：{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}%` : (idx.pePct ? `${idx.pePct}%` : '暂无数据')}
+            基于 PE 百分位：{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}%` : '暂无数据'}
           </div>
         </div>
 
+        {/* 估值分析 */}
         <div className="p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-2xl text-xs text-slate-600 leading-relaxed">
           <div className="font-bold text-indigo-600 mb-1">估值分析</div>
           <p>
-            当前指数 PE 为 {iv?.pe ? iv.pe.toFixed(2) : (bd?.pe && bd.pe > 0 ? bd.pe : '—')}，PB 为 {iv?.pb ? iv.pb.toFixed(2) : (bd?.pb && bd.pb > 0 ? bd.pb : '—')}。
-            {(iv?.pe || bd?.pe) && (iv?.pe || parseFloat(bd.pe)) < 15 ? '当前估值处于较低水平，具备较好的投资性价比。' : 
-             (iv?.pe || bd?.pe) && (iv?.pe || parseFloat(bd.pe)) > 30 ? '当前估值处于较高水平，需警惕回调风险。' : 
+            当前指数 PE 为 {iv?.pe ? iv.pe.toFixed(2) : '\u2014'}，PB 为 {iv?.pb ? iv.pb.toFixed(2) : '\u2014'}
+            {iv?.roe ? `，ROE 为 ${(iv.roe * 100).toFixed(2)}%` : ''}
+            {iv?.peg ? `，PEG 为 ${iv.peg.toFixed(2)}` : ''}。
+            {iv?.pe && iv.pe < 15 ? '当前估值处于较低水平，具备较好的投资性价比。' : 
+             iv?.pe && iv.pe > 30 ? '当前估值处于较高水平，需警惕回调风险。' : 
              '当前估值处于合理区间。'}
+            {iv?.peg && iv.peg > 0 && iv.peg < 1 ? ' PEG<1，盈利增速快于估值，值得关注。' : ''}
           </p>
         </div>
       </div>
@@ -470,7 +526,7 @@ export default function App() {
   const [isAddingCompany, setIsAddingCompany] = useState(false);
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; p?: string; cp?: string }>>({});
-  const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>>({});
+  const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string }>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('iv_dark');
     if (saved !== null) return saved === 'true';
@@ -750,6 +806,10 @@ export default function App() {
               dy: (match.yeild || match.dy) > 0 ? (match.yeild || match.dy) : undefined,
               pePct: (match.pe_percentile || match.pePct) > 0 ? (match.pe_percentile || match.pePct) : undefined,
               pbPct: (match.pb_percentile || match.pbPct) > 0 ? (match.pb_percentile || match.pbPct) : undefined,
+              roe: match.roe > 0 ? match.roe : undefined,
+              peg: match.peg > 0 ? match.peg : undefined,
+              evaType: match.eva_type || undefined,
+              bondYield: match.bond_yeild > 0 ? match.bond_yeild : undefined,
             };
           }
         }
@@ -2112,6 +2172,20 @@ export default function App() {
                     <div className="text-[10px] text-slate-400 font-mono">{idx.c}</div>
                   </div>
                   <div className="flex items-center gap-4">
+                    <div className="flex gap-3 text-center">
+                      <div>
+                        <div className="text-[9px] text-slate-400 font-bold">PE</div>
+                        <div className="text-xs font-bold text-slate-700">{iv?.pe ? iv.pe.toFixed(1) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-slate-400 font-bold">PE%</div>
+                        <div className="text-xs font-bold text-slate-700">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(0)}%` : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-slate-400 font-bold">ROE</div>
+                        <div className="text-xs font-bold text-slate-700">{iv?.roe ? `${(iv.roe * 100).toFixed(1)}%` : '—'}</div>
+                      </div>
+                    </div>
                     <div className="text-right">
                       <div className="text-sm font-bold text-slate-800">{bd?.p || '—'}</div>
                       {bd?.cp && (
