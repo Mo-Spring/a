@@ -322,7 +322,21 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
         <button onClick={() => setView('index_list')} className="breadcrumb-link">指数列表</button>
         <ChevronRight size={12} />
         <span>{idx.n}</span>
-        <button onClick={(e) => toggleFav(idx.c, 'index', e)} className="ml-auto p-1 text-amber-400">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(`确定删除 "${idx.n}" 吗？`)) {
+              const newIndices = indices.filter(i => i.c !== idx.c);
+              setIndices(newIndices);
+              localStorage.setItem('iv_indices', JSON.stringify(newIndices));
+              setView('index_list');
+            }
+          }}
+          className="ml-auto p-1 text-slate-300 hover:text-red-500 transition-colors"
+        >
+          <Trash2 size={18} />
+        </button>
+        <button onClick={(e) => toggleFav(idx.c, 'index', e)} className="p-1 text-amber-400">
           {favIndices.includes(idx.c) ? <Star fill="currentColor" size={20} /> : <Star size={20} />}
         </button>
       </div>
@@ -355,32 +369,44 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
           </div>
         </div>
 
-        {/* 核心六指标 */}
+        {/* 估值指标 */}
         <div className="grid grid-cols-3 gap-2">
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE (TTM)</div>
-            <div className="text-base font-bold text-slate-800">{iv?.pe ? iv.pe.toFixed(2) : '\u2014'}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB</div>
-            <div className="text-base font-bold text-slate-800">{iv?.pb ? iv.pb.toFixed(2) : '\u2014'}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">股息率</div>
-            <div className="text-base font-bold text-slate-800">{iv?.dy ? `${(iv.dy * 100).toFixed(2)}%` : '\u2014'}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">ROE</div>
-            <div className="text-base font-bold text-slate-800">{iv?.roe ? `${(iv.roe * 100).toFixed(2)}%` : '\u2014'}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PEG</div>
-            <div className="text-base font-bold text-slate-800">{iv?.peg ? iv.peg.toFixed(2) : '\u2014'}</div>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 text-center">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">国债利率</div>
-            <div className="text-base font-bold text-slate-800">{iv?.bondYield ? `${(iv.bondYield * 100).toFixed(2)}%` : '\u2014'}</div>
-          </div>
+          {iv?.pe && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE (TTM)</div>
+              <div className="text-base font-bold text-slate-800">{iv.pe.toFixed(2)}</div>
+            </div>
+          )}
+          {iv?.pb && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB</div>
+              <div className="text-base font-bold text-slate-800">{iv.pb.toFixed(2)}</div>
+            </div>
+          )}
+          {iv?.dy && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">股息率</div>
+              <div className="text-base font-bold text-slate-800">{(iv.dy * 100).toFixed(2)}%</div>
+            </div>
+          )}
+          {iv?.roe && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">ROE</div>
+              <div className="text-base font-bold text-slate-800">{(iv.roe * 100).toFixed(2)}%</div>
+            </div>
+          )}
+          {iv?.peg && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PEG</div>
+              <div className="text-base font-bold text-slate-800">{iv.peg.toFixed(2)}</div>
+            </div>
+          )}
+          {iv?.bondYield && (
+            <div className="bg-slate-50 rounded-xl p-3 text-center">
+              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">国债利率</div>
+              <div className="text-base font-bold text-slate-800">{(iv.bondYield * 100).toFixed(2)}%</div>
+            </div>
+          )}
         </div>
 
         {iv?.source === 'computed' && (
@@ -1141,6 +1167,7 @@ export default function App() {
   }, [view, navArgs]);
 
   const handleDeleteCompany = (code: string) => {
+    if (!window.confirm('确定删除该公司吗？')) return;
     const newDeleted = [...deletedCompanies, code];
     setDeletedCompanies(newDeleted);
     localStorage.setItem('iv_deleted_comps', JSON.stringify(newDeleted));
@@ -2152,8 +2179,6 @@ export default function App() {
             const iv = indexVal[idx.c];
             const pePct = (iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50;
             const status = pePct < 30 ? 'low' : pePct > 70 ? 'high' : 'mid';
-            const statusText = status === 'low' ? '低估' : status === 'high' ? '高估' : '适中';
-            const statusColor = status === 'low' ? 'bg-emerald-50 text-emerald-600' : status === 'high' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600';
 
             return (
               <div
@@ -2165,27 +2190,39 @@ export default function App() {
                   <div>
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-bold text-slate-800">{idx.n}</div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${statusColor}`}>
-                        {statusText}
-                      </span>
+                      {iv?.evaType && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                          iv.evaType === 'low' ? 'bg-emerald-50 text-emerald-600' :
+                          iv.evaType === 'high' ? 'bg-red-50 text-red-600' :
+                          'bg-amber-50 text-amber-600'
+                        }`}>
+                          {iv.evaType === 'low' ? '低估' : iv.evaType === 'high' ? '高估' : '适中'}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-400 font-mono">{idx.c}</div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex gap-3 text-center">
-                      <div>
-                        <div className="text-[9px] text-slate-400 font-bold">PE</div>
-                        <div className="text-xs font-bold text-slate-700">{iv?.pe ? iv.pe.toFixed(1) : '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] text-slate-400 font-bold">PE%</div>
-                        <div className="text-xs font-bold text-slate-700">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(0)}%` : '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] text-slate-400 font-bold">ROE</div>
-                        <div className="text-xs font-bold text-slate-700">{iv?.roe ? `${(iv.roe * 100).toFixed(1)}%` : '—'}</div>
-                      </div>
+                    <div className="flex gap-3 mt-1">
+                      {iv?.pePct !== undefined && (
+                        <div>
+                          <div className="text-[9px] text-slate-400 font-bold">PE%</div>
+                          <div className="text-xs font-bold text-slate-700">{(iv.pePct * 100).toFixed(0)}%</div>
+                        </div>
+                      )}
+                      {iv?.roe && (
+                        <div>
+                          <div className="text-[9px] text-slate-400 font-bold">ROE</div>
+                          <div className="text-xs font-bold text-slate-700">{(iv.roe * 100).toFixed(1)}%</div>
+                        </div>
+                      )}
+                      {iv?.dy && (
+                        <div>
+                          <div className="text-[9px] text-slate-400 font-bold">股息率</div>
+                          <div className="text-xs font-bold text-slate-700">{(iv.dy * 100).toFixed(1)}%</div>
+                        </div>
+                      )}
                     </div>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className="text-sm font-bold text-slate-800">{bd?.p || '—'}</div>
                       {bd?.cp && (
@@ -2194,31 +2231,28 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    <button 
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const newIndices = indices.filter(i => i.c !== idx.c);
-                        setIndices(newIndices);
-                        localStorage.setItem('iv_indices', JSON.stringify(newIndices));
+                        if (window.confirm(`确定删除 "${idx.n}" 吗？`)) {
+                          const newIndices = indices.filter(i => i.c !== idx.c);
+                          setIndices(newIndices);
+                          localStorage.setItem('iv_indices', JSON.stringify(newIndices));
+                        }
                       }}
                       className="p-2 text-slate-300 hover:text-red-500 transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2 mt-3">
-                  <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                    <div className="text-[9px] text-slate-400 font-bold uppercase">PE</div>
-                    <div className="text-xs font-bold text-slate-700">{iv?.pe ? iv.pe.toFixed(2) : (bd?.pe !== undefined && bd.pe > 0 ? bd.pe : '—')}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                    <div className="text-[9px] text-slate-400 font-bold uppercase">PB</div>
-                    <div className="text-xs font-bold text-slate-700">{iv?.pb ? iv.pb.toFixed(2) : (bd?.pb !== undefined && bd.pb > 0 ? bd.pb : '—')}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                    <div className="text-[9px] text-slate-400 font-bold uppercase">股息率</div>
-                    <div className="text-xs font-bold text-slate-700">{iv?.dy ? `${(iv.dy * 100).toFixed(2)}%` : (bd?.dy !== undefined && bd.dy > 0 ? `${bd.dy}%` : '—')}</div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFav(idx.c, 'index', e);
+                      }}
+                      className="p-2 text-amber-400 transition-colors"
+                    >
+                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={16} /> : <Star size={16} />}
+                    </button>
                   </div>
                 </div>
               </div>
