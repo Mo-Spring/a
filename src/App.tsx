@@ -2201,23 +2201,14 @@ export default function App() {
                 onClick={() => navigate('index_detail', idx)}
                 className="card-interactive p-4"
               >
-                {/* Row 1: name + valuation badge */}
+                {/* Row 1: name + code + badge + actions */}
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
-                  {iv?.evaType && (
-                    <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
-                      {evText(iv.evaType)}
-                    </span>
-                  )}
-                </div>
-
-                {/* Row 2: price + change + actions */}
-                <div className="flex justify-between items-center mb-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                    {bd?.cp && (
-                      <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                        {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
+                  <div className="flex items-center gap-2">
+                    <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{idx.c}</span>
+                    {iv?.evaType && (
+                      <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
+                        {evText(iv.evaType)}
                       </span>
                     )}
                   </div>
@@ -2231,20 +2222,30 @@ export default function App() {
                           localStorage.setItem('iv_indices', JSON.stringify(newIndices));
                         }
                       }}
-                      className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={18} />
                     </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleFav(idx.c, 'index', e);
                       }}
-                      className="p-1.5 text-amber-400 transition-colors"
+                      className="p-2 text-amber-400 transition-colors"
                     >
-                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={14} /> : <Star size={14} />}
+                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={18} /> : <Star size={18} />}
                     </button>
                   </div>
+                </div>
+
+                {/* Row 2: price + change */}
+                <div className="flex items-baseline gap-2 mb-3">
+                  <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
+                  {bd?.cp && (
+                    <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
+                    </span>
+                  )}
                 </div>
 
                 {/* Row 3: PE% / ROE / 股息率 */}
