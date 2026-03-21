@@ -147,19 +147,19 @@ const SearchView = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex bg-white border border-slate-200 rounded-2xl p-1 shadow-sm">
+      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
         <button
           onClick={() => handleTypeSwitch('stock')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            searchType === 'stock' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
+            searchType === 'stock' ? 'tab-pill-active' : 'tab-pill-inactive'
           }`}
         >
           搜索股票
         </button>
         <button
           onClick={() => handleTypeSwitch('index')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            searchType === 'index' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
+            searchType === 'index' ? 'tab-pill-active' : 'tab-pill-inactive'
           }`}
         >
           搜索指数
@@ -167,10 +167,10 @@ const SearchView = ({
       </div>
 
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
         <input
           autoFocus
-          className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-500 transition-colors shadow-sm"
+          className="input-field pl-10 pr-4 py-3 rounded-2xl shadow-card"
           placeholder={searchType === 'stock' ? "搜索公司名称或代码..." : "搜索指数名称或代码..."}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -184,7 +184,7 @@ const SearchView = ({
               <div
                 key={`${c.source}-${c.market}-${c.c}`}
                 onClick={() => { setMarket(c.market || 'A'); navigate('comp', c.c, c.n); }}
-                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+                className="card-interactive p-4"
               >
                 <div className="flex justify-between items-start mb-2">
                   <div>
@@ -216,7 +216,7 @@ const SearchView = ({
                 <button
                   onClick={handleAiAddCompany}
                   disabled={isAddingCompany}
-                  className="w-full bg-indigo-50 border border-indigo-100 text-indigo-600 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50"
+                  className="w-full bg-brand-50 border border-brand-100 text-brand-600 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50"
                 >
                   {isAddingCompany ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
                   {isAddingCompany ? '正在让 AI 识别并添加...' : `找不到？让 AI 自动添加 "${searchQuery}"`}
@@ -235,7 +235,7 @@ const SearchView = ({
               <div
                 key={`${idx.m}-${idx.c}`}
                 onClick={() => addIndex(idx)}
-                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer flex justify-between items-center"
+                className="card-interactive p-4 flex justify-between items-center"
               >
                 <div>
                   <div className="text-sm font-bold text-slate-800">{idx.n}</div>
@@ -245,7 +245,7 @@ const SearchView = ({
               </div>
             ))}
             {searchQuery.length > 0 && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-sm">
+              <div className="card p-6 text-center">
                 {remoteResults.length === 0 && (
                   <div className="text-slate-400 text-sm mb-4">未找到相关指数，您可以手动添加</div>
                 )}
@@ -271,7 +271,7 @@ const SearchView = ({
                     setIndexMarket(m);
                     navigate('index_detail', newIdx);
                   }}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform"
+                  className="btn-primary px-6 py-2.5 rounded-xl"
                 >
                   手动添加指数: {searchQuery}
                 </button>
@@ -302,8 +302,8 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
-        <button onClick={() => setView('index_list')} className="text-indigo-600">指数列表</button>
+      <div className="breadcrumb">
+        <button onClick={() => setView('index_list')} className="breadcrumb-link">指数列表</button>
         <ChevronRight size={12} />
         <span>{idx.n}</span>
         <button onClick={(e) => toggleFav(idx.c, 'index', e)} className="ml-auto p-1 text-amber-400">
@@ -311,7 +311,7 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
         </button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6">
+      <div className="card-elevated p-5 space-y-6">
         <div className="flex justify-between items-start">
           <div>
             <h2 className="text-xl font-bold text-slate-800">{idx.n}</h2>
@@ -981,114 +981,125 @@ export default function App() {
   const renderHome = () => (
     <div className="space-y-4">
       {/* Market Switcher */}
-      <div className="flex bg-white border border-slate-200 rounded-2xl p-1 shadow-sm">
+      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
         <button
           onClick={() => setMarket('A')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            market === 'A' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
+            market === 'A' ? 'tab-pill-active' : 'tab-pill-inactive'
           }`}
         >
           A股行业
         </button>
         <button
           onClick={() => setMarket('HK')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-            market === 'HK' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
+            market === 'HK' ? 'tab-pill-active' : 'tab-pill-inactive'
           }`}
         >
           港股行业
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
-          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">一级行业</div>
-          <div className="text-xl font-bold text-indigo-600">{currentIndustries.length}</div>
+      {/* Stats Row */}
+      <div className="grid grid-cols-3 gap-2.5">
+        <div className="stat-cell">
+          <div className="stat-label">一级行业</div>
+          <div className="text-xl font-extrabold text-brand-600 tabular-nums">{currentIndustries.length}</div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
-          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">龙头公司</div>
-          <div className="text-xl font-bold text-cyan-600">
+        <div className="stat-cell">
+          <div className="stat-label">龙头公司</div>
+          <div className="text-xl font-extrabold text-cyan-600 tabular-nums">
             {currentIndustries.reduce((a, i) => a + i.l2.reduce((b, s) => b + (s.cs || []).length, 0), 0)}
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
-          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">低估行业</div>
-          <div className="text-xl font-bold text-emerald-600">
+        <div className="stat-cell">
+          <div className="stat-label">低估行业</div>
+          <div className="text-xl font-extrabold text-emerald-600 tabular-nums">
             {currentIndustries.filter(i => i.ev === 'low').length}
           </div>
         </div>
       </div>
 
+      {/* Filter Pills */}
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
         {(['all', 'low', 'mid', 'high'] as const).map(t => (
           <button
             key={t}
             onClick={() => setFilter(t)}
-            className={`px-4 py-1.5 rounded-full border text-xs font-medium whitespace-nowrap transition-all ${
-              filter === t ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600'
+            className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 ${
+              filter === t 
+                ? 'bg-slate-900 text-white shadow-md' 
+                : 'bg-white text-slate-500 border border-slate-200/60'
             }`}
           >
-            {t === 'all' ? '全部' : t === 'low' ? '🟢 低估' : t === 'mid' ? '🟡 适中' : '🔴 高估'}
+            {t === 'all' ? '全部' : t === 'low' ? '低估' : t === 'mid' ? '适中' : '高估'}
           </button>
         ))}
       </div>
 
+      {/* Industry Cards */}
       <div className="space-y-3">
         {currentIndustries.filter(i => filter === 'all' || i.ev === filter).map((ind, idx) => {
           const indVal = getIndustryValuation(ind);
           return (
           <motion.div
             layout
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             key={ind.id}
             onClick={() => navigate('ind', idx)}
-            className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer relative overflow-hidden"
+            className="card-interactive p-4 relative overflow-hidden"
           >
             {indVal.source === 'index' && (
-              <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[8px] px-2 py-0.5 rounded-bl-lg font-bold scale-90 origin-top-right">
-                指数数据
+              <div className="absolute top-0 right-0 badge-brand rounded-bl-xl px-2.5 py-1 scale-90 origin-top-right">
+                实时数据
               </div>
             )}
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-slate-800">{ind.ic} {ind.nm}</span>
+                <span className="text-[15px] font-extrabold text-slate-900">{ind.ic} {ind.nm}</span>
                 {indVal.cp !== undefined && (
-                  <span className={`text-[10px] font-bold ${parseFloat(indVal.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                    {parseFloat(indVal.cp) >= 0 ? '+' : ''}{indVal.cp}%
+                  <span className={`text-[10px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                    {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
                   </span>
                 )}
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${evColor(ind.ev)}`}>
+              <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
                 {evText(ind.ev)}
               </span>
             </div>
             {Number(indVal.pe) > 0 && (
-              <div className="grid grid-cols-3 gap-1.5 mb-3">
-                <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                  <div className="text-[9px] text-slate-400 font-bold uppercase">PE</div>
-                  <div className="text-xs font-bold text-slate-700">{indVal.pe}</div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="stat-cell py-2">
+                  <div className="stat-label">PE</div>
+                  <div className="stat-value">{indVal.pe}</div>
                 </div>
-                <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                  <div className="text-[9px] text-slate-400 font-bold uppercase">PB</div>
-                  <div className="text-xs font-bold text-slate-700">{indVal.pb}</div>
+                <div className="stat-cell py-2">
+                  <div className="stat-label">PB</div>
+                  <div className="stat-value">{indVal.pb}</div>
                 </div>
-                <div className="bg-slate-50 rounded-lg py-1.5 text-center">
-                  <div className="text-[9px] text-slate-400 font-bold uppercase">股息率</div>
-                  <div className="text-xs font-bold text-slate-700">{indVal.dy}%</div>
+                <div className="stat-cell py-2">
+                  <div className="stat-label">股息率</div>
+                  <div className="stat-value">{indVal.dy}%</div>
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 text-[10px] mb-2">
-              <span className="text-slate-400 font-medium w-10">PE%位</span>
-              <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full ${pBg(ind.pp)}`} style={{ width: `${Math.min(ind.pp, 100)}%` }} />
+            <div className="flex items-center gap-2 text-[10px] mb-2.5">
+              <span className="text-slate-400 font-bold w-10">PE%位</span>
+              <div className="progress-bar flex-1">
+                <div 
+                  className="progress-bar-fill" 
+                  style={{ 
+                    width: `${Math.min(ind.pp, 100)}%`,
+                    background: ind.pp < 30 ? 'linear-gradient(90deg, #10b981, #34d399)' : ind.pp < 70 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)'
+                  }} 
+                />
               </div>
-              <span className={`w-8 text-right font-bold ${pColor(ind.pp)}`}>{ind.pp}%</span>
+              <span className={`w-8 text-right font-bold tabular-nums ${pColor(ind.pp)}`}>{ind.pp}%</span>
             </div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1.5">
               {ind.l2.map(s => (
-                <span key={s.nm} className="text-[9px] px-2 py-0.5 bg-slate-50 text-slate-500 border border-slate-100 rounded-md font-medium">
+                <span key={s.nm} className="text-[9px] px-2 py-0.5 bg-surface text-slate-500 border border-slate-100/80 rounded-md font-semibold">
                   {s.nm}
                 </span>
               ))}
@@ -1103,38 +1114,39 @@ export default function App() {
     const ind = currentIndustries[idx];
     if (!ind) return null;
     const indVal = getIndustryValuation(ind);
-    const totalCompanies = ind.l2.reduce((a, s) => a + (s.cs || []).length, 0);
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
-          <button onClick={() => setView('home')} className="text-indigo-600">全部</button>
-          <ChevronRight size={12} />
-          <span>{ind.nm}</span>
+      <div className="space-y-5">
+        {/* Breadcrumb */}
+        <div className="breadcrumb">
+          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
+          <ChevronRight size={11} />
+          <span className="text-slate-600 font-medium">{ind.nm}</span>
         </div>
 
-                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+        {/* Industry Overview Card */}
+        <div className="card-elevated p-5 relative overflow-hidden">
           {indVal.source === 'index' && (
-            <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[9px] px-3 py-1 rounded-bl-xl font-bold">
-              全行业指数实时数据
+            <div className="absolute top-0 right-0 badge-brand rounded-bl-xl px-2.5 py-1">
+              实时指数数据
             </div>
           )}
           <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-800">{ind.ic} {ind.nm}</h2>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-lg font-extrabold text-slate-900">{ind.ic} {ind.nm}</h2>
               {indVal.cp !== undefined && (
-                <span className={`text-sm font-bold ${parseFloat(indVal.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                  {parseFloat(indVal.cp) >= 0 ? '+' : ''}{indVal.cp}%
+                <span className={`text-[11px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
                 </span>
               )}
             </div>
-            <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${evColor(ind.ev)}`}>
+            <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
               {evText(ind.ev)}
             </span>
           </div>
 
           {ind.indices && ind.indices.length > 0 && (
             <div className="mb-4">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-2">相关指数</div>
+              <div className="stat-label mb-2">相关指数</div>
               <div className="flex flex-wrap gap-2">
                 {ind.indices.map(idxInfo => {
                   const bd = batchData[idxInfo.c];
@@ -1142,14 +1154,14 @@ export default function App() {
                     <button
                       key={idxInfo.c}
                       onClick={() => navigate('index', idx, idxInfo.c)}
-                      className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-left active:scale-95 transition-transform"
+                      className="stat-cell px-3 py-2 text-left active:scale-95 transition-transform"
                     >
                       <div className="text-[10px] font-bold text-slate-700">{idxInfo.n}</div>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-900">{bd?.p || '—'}</span>
+                        <span className="text-xs font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
                         {bd?.cp && (
-                          <span className={`text-[9px] font-bold ${parseFloat(bd.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                            {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
+                          <span className={`text-[9px] font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {parseFloat(bd.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
                           </span>
                         )}
                       </div>
@@ -1159,6 +1171,7 @@ export default function App() {
               </div>
             </div>
           )}
+          
           <div className="grid grid-cols-3 gap-2 mb-4">
             {[
               { label: 'PE', val: indVal.pe || '—' },
@@ -1168,59 +1181,62 @@ export default function App() {
               { label: 'PE%位', val: `${ind.pp}%`, color: pColor(ind.pp) },
               { label: 'PB%位', val: `${ind.bp}%`, color: pColor(ind.bp) },
             ].map(m => (
-              <div key={m.label} className="bg-slate-50 rounded-xl p-2 text-center">
-                <div className="text-[9px] text-slate-400 font-bold uppercase">{m.label}</div>
-                <div className={`text-sm font-bold ${m.color || 'text-slate-700'}`}>{m.val}</div>
+              <div key={m.label} className="stat-cell">
+                <div className="stat-label">{m.label}</div>
+                <div className={`stat-value ${m.color || ''}`}>{m.val}</div>
               </div>
             ))}
           </div>
-          <div className="p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-xl text-xs text-slate-600 leading-relaxed">
-            💡 {ind.an}
+          
+          <div className="p-3.5 bg-brand-50/50 border-l-[3px] border-brand-400 rounded-r-xl text-[13px] text-slate-600 leading-relaxed">
+            {ind.an}
           </div>
         </div>
 
-        <div className="space-y-2">
-          <h3 className="text-sm font-bold text-slate-800 px-1">📂 二级行业</h3>
+        {/* Sub-industries */}
+        <div className="space-y-2.5">
+          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">二级行业</h3>
           {ind.l2.map((s, si) => (
             <div
               key={s.nm}
               onClick={() => navigate('sub', idx, si)}
-              className="bg-white border border-slate-200 rounded-2xl p-4 flex justify-between items-center shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+              className="card-interactive p-4 flex justify-between items-center"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-slate-700">{s.nm}</span>
-                <span className="text-[9px] px-1.5 py-0.5 bg-indigo-50 text-indigo-500 rounded font-bold">二级</span>
+              <div className="flex items-center gap-2.5">
+                <span className="text-[13px] font-bold text-slate-800">{s.nm}</span>
+                <span className="badge-brand text-[8px]">二级</span>
               </div>
-              <div className="flex items-center gap-1 text-xs text-slate-400">
-                {s.cs.length}家公司 <ChevronRight size={14} />
+              <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
+                {s.cs.length}家 <ChevronRight size={13} className="text-slate-300" />
               </div>
             </div>
           ))}
         </div>
 
-        <div className="space-y-2">
-          <h3 className="text-sm font-bold text-slate-800 px-1">🏢 龙头公司</h3>
+        {/* Company Cards */}
+        <div className="space-y-2.5">
+          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">龙头公司</h3>
           {ind.l2.flatMap(s => s.cs.map(c => ({ ...c, sn: s.nm }))).map(c => (
             <div
               key={`${c.market || 'A'}-${c.c}`}
               onClick={() => navigate('comp', c.c, c.n)}
-              className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+              className="card-interactive p-4"
             >
-              <div className="flex justify-between items-start mb-2">
+              <div className="flex justify-between items-start mb-2.5">
                 <div>
-                  <div className="text-sm font-bold text-slate-800">{c.n}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{c.c} · {c.sn}</div>
+                  <div className="text-[13px] font-bold text-slate-900">{c.n}</div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{c.c} · {c.sn}</div>
                 </div>
                 {batchData[c.c] && batchData[c.c].p && (
                   <div className="text-right">
-                    <div className="text-sm font-bold text-slate-800">¥{batchData[c.c].p}</div>
-                    <div className={`text-[10px] font-bold ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                      {parseFloat(batchData[c.c].cp || '0') >= 0 ? '+' : ''}{batchData[c.c].cp}%
+                    <div className="text-[13px] font-bold text-slate-900 tabular-nums">¥{batchData[c.c].p}</div>
+                    <div className={`text-[10px] font-bold tabular-nums ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {parseFloat(batchData[c.c].cp || '0') >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(batchData[c.c].cp || '0')).toFixed(2)}%
                     </div>
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-5 gap-1">
+              <div className="grid grid-cols-5 gap-1.5">
                 {[
                   { l: 'PE', v: batchData[c.c]?.pe || c.pe || '—' },
                   { l: 'PB', v: batchData[c.c]?.pb || c.pb },
@@ -1228,9 +1244,9 @@ export default function App() {
                   { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
                   { l: 'PS', v: c.ps },
                 ].map(m => (
-                  <div key={m.l} className="bg-slate-50 rounded-lg py-1 text-center">
-                    <div className="text-[8px] text-slate-400 font-bold uppercase">{m.l}</div>
-                    <div className="text-[10px] font-bold text-slate-700">{m.v}</div>
+                  <div key={m.l} className="stat-cell py-1.5">
+                    <div className="stat-label text-[7px]">{m.l}</div>
+                    <div className="text-[10px] font-bold text-slate-700 tabular-nums">{m.v}</div>
                   </div>
                 ))}
               </div>
@@ -1248,10 +1264,10 @@ export default function App() {
     if (!sub) return null;
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
-          <button onClick={() => setView('home')} className="text-indigo-600">全部</button>
+        <div className="breadcrumb">
+          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
           <ChevronRight size={12} />
-          <button onClick={() => navigate('ind', idx)} className="text-indigo-600">{ind.nm}</button>
+          <button onClick={() => navigate('ind', idx)} className="breadcrumb-link">{ind.nm}</button>
           <ChevronRight size={12} />
           <span>{sub.nm}</span>
         </div>
@@ -1266,7 +1282,7 @@ export default function App() {
             <div
               key={`${c.market || 'A'}-${c.c}`}
               onClick={() => navigate('comp', c.c, c.n)}
-              className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+              className="card-interactive p-4"
             >
               <div className="flex justify-between items-start mb-2">
                 <div>
@@ -1363,15 +1379,15 @@ export default function App() {
 
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
-          <button onClick={() => setView('home')} className="text-indigo-600">全部</button>
+        <div className="breadcrumb">
+          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
           <ChevronRight size={12} />
-          <button onClick={() => ii >= 0 ? navigate('ind', ii) : setView('home')} className="text-indigo-600">{ind.nm}</button>
+          <button onClick={() => ii >= 0 ? navigate('ind', ii) : setView('home')} className="breadcrumb-link">{ind.nm}</button>
           <ChevronRight size={12} />
           <span>{c.n}</span>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="card-elevated p-5 space-y-4">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-xl font-bold text-slate-800">{c.n}</h2>
@@ -1590,23 +1606,26 @@ export default function App() {
 
     return (
       <div className="flex flex-col h-[calc(100vh-140px)]">
-        <div className="text-[10px] text-slate-400 text-center mb-2 font-bold uppercase tracking-widest">
-          {config.apiKey ? `✨ AI 助手已就绪 (${config.provider})` : '⚠️ 未配置 API'}
+        <div className="text-[10px] text-center mb-3 font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
+          {config.apiKey ? `AI 助手已就绪 · ${config.provider}` : '⚠️ 未配置 API'}
         </div>
         
-        <div className="flex-1 overflow-y-auto space-y-4 pb-4 px-1 no-scrollbar" id="aiMsgs">
+        <div className="flex-1 overflow-y-auto space-y-3 pb-4 px-1 no-scrollbar" id="aiMsgs">
           {aiHistory.length === 0 && (
-            <div className="text-center py-20 space-y-4">
-              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto text-indigo-600">
-                <Bot size={32} />
+            <div className="text-center py-24 space-y-4">
+              <div className="w-16 h-16 bg-brand-50 rounded-2xl flex items-center justify-center mx-auto text-brand-500 shadow-glow-sm">
+                <Bot size={28} />
               </div>
-              <div className="text-sm text-slate-500">我是你的 AI 投资助手，可以问我关于行业趋势或公司估值的问题。</div>
+              <div>
+                <div className="text-sm font-bold text-slate-700 mb-1">AI 投资助手</div>
+                <div className="text-xs text-slate-400">问我关于行业趋势或公司估值的问题</div>
+              </div>
             </div>
           )}
           {aiHistory.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                m.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
+              <div className={`max-w-[85%] px-4 py-2.5 text-[13px] leading-relaxed ${
+                m.role === 'user' ? 'chat-bubble-user text-white' : 'chat-bubble-ai text-slate-700'
               }`}>
                 {m.content}
               </div>
@@ -1614,8 +1633,8 @@ export default function App() {
           ))}
           {aiLoading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-2xl rounded-tl-none shadow-sm text-slate-400 flex items-center gap-2 text-sm">
-                <Loader2 size={16} className="animate-spin" /> 思考中...
+              <div className="chat-bubble-ai px-4 py-2.5 text-slate-400 flex items-center gap-2 text-[13px]">
+                <Loader2 size={15} className="animate-spin" /> 思考中...
               </div>
             </div>
           )}
@@ -1624,16 +1643,16 @@ export default function App() {
         <form onSubmit={handleSend} className="flex gap-2 mt-2">
           <input
             id="aiIn"
-            className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-500 transition-colors shadow-sm"
+            className="input-field flex-1 rounded-2xl py-3"
             placeholder="问问 AI..."
             disabled={aiLoading}
           />
           <button
             type="submit"
             disabled={aiLoading}
-            className="bg-indigo-600 text-white p-3 rounded-2xl shadow-md active:scale-95 transition-transform disabled:opacity-50"
+            className="btn-primary p-3 rounded-2xl disabled:opacity-40"
           >
-            <Send size={20} />
+            <Send size={18} />
           </button>
         </form>
       </div>
@@ -1649,15 +1668,15 @@ export default function App() {
 
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-1 text-xs text-slate-400 mb-2">
-          <button onClick={() => setView('home')} className="text-indigo-600">全部</button>
+        <div className="breadcrumb">
+          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
           <ChevronRight size={12} />
-          <button onClick={() => navigate('ind', indIdx)} className="text-indigo-600">{ind.nm}</button>
+          <button onClick={() => navigate('ind', indIdx)} className="breadcrumb-link">{ind.nm}</button>
           <ChevronRight size={12} />
           <span>{indexInfo.n}</span>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm relative overflow-hidden">
+        <div className="card-elevated p-6 relative overflow-hidden">
           <div className="flex justify-between items-start mb-6">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -1723,13 +1742,13 @@ export default function App() {
 
     return (
       <div className="space-y-4">
-        <div className="flex bg-white border border-slate-200 rounded-2xl p-1 shadow-sm">
+        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
           {(['A', 'HK', 'GLOBAL'] as const).map(m => (
             <button
               key={m}
               onClick={() => setIndexMarket(m)}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-                indexMarket === m ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500'
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
+                indexMarket === m ? 'tab-pill-active' : 'tab-pill-inactive'
               }`}
             >
               {m === 'A' ? 'A股指数' : m === 'HK' ? '港股指数' : '国外指数'}
@@ -1737,13 +1756,13 @@ export default function App() {
           ))}
         </div>
 
-        <div className="flex bg-white border border-slate-200 rounded-2xl p-1 shadow-sm overflow-x-auto">
+        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card overflow-x-auto">
           {(['all', 'low', 'mid', 'high'] as const).map(f => (
             <button
               key={f}
               onClick={() => setIndexValFilter(f)}
-              className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
-                indexValFilter === f ? 'bg-slate-800 text-white shadow-md' : 'text-slate-500'
+              className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all duration-200 whitespace-nowrap ${
+                indexValFilter === f ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'
               }`}
             >
               {f === 'all' ? '全部' : f === 'low' ? '低估' : f === 'mid' ? '适中' : '高估'}
@@ -1764,7 +1783,7 @@ export default function App() {
               <div
                 key={idx.c}
                 onClick={() => navigate('index_detail', idx)}
-                className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+                className="card-interactive p-4"
               >
                 <div className="flex justify-between items-center">
                   <div>
@@ -1836,7 +1855,7 @@ export default function App() {
           <div
             key={`${c.market}-${c.c}`}
             onClick={() => { setMarket(c.market || 'A'); navigate('comp', c.c, c.n); }}
-            className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+            className="card-interactive p-4"
           >
             <div className="flex justify-between items-start mb-2">
               <div>
@@ -1881,7 +1900,7 @@ export default function App() {
           <div
             key={idx.c}
             onClick={() => navigate('index_detail', idx)}
-            className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform cursor-pointer"
+            className="card-interactive p-4"
           >
             <div className="flex justify-between items-center">
               <div>
@@ -1908,9 +1927,9 @@ export default function App() {
   const renderFav = () => {
     return (
       <div className="space-y-4">
-        <div className="flex bg-slate-100 p-1 rounded-xl">
-          <button onClick={() => setFavTab('stocks')} className={`flex-1 py-2 text-sm font-bold rounded-lg ${favTab === 'stocks' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>自选股</button>
-          <button onClick={() => setFavTab('indices')} className={`flex-1 py-2 text-sm font-bold rounded-lg ${favTab === 'indices' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>自选指数</button>
+        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
+          <button onClick={() => setFavTab('stocks')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'stocks' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选股</button>
+          <button onClick={() => setFavTab('indices')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'indices' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选指数</button>
         </div>
         {favTab === 'stocks' ? renderFavStocks() : renderFavIndices()}
       </div>
@@ -1918,29 +1937,29 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="min-h-screen bg-surface pb-24">
       {/* Top Bar */}
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 pb-3 flex items-center justify-between shadow-sm" style={{ paddingTop: `calc(12px + env(safe-area-inset-top, 0px))` }}>
-        <div className="flex items-center gap-2">
+      <div className="sticky top-0 z-50 nav-glass px-4 pb-3 flex items-center justify-between" style={{ paddingTop: `calc(12px + env(safe-area-inset-top, 0px))` }}>
+        <div className="flex items-center gap-2.5">
           {navStack.length > 0 && view !== 'home' && (
-            <button onClick={goBack} className="p-1 text-slate-600 active:scale-90 transition-transform">
-              <ArrowLeft size={20} />
+            <button onClick={goBack} className="p-1.5 -ml-1 rounded-xl text-slate-500 hover:bg-slate-100/60 active:scale-90 transition-all">
+              <ArrowLeft size={20} strokeWidth={2.5} />
             </button>
           )}
-          <h1 className="text-base font-bold text-slate-800 tracking-tight flex items-center gap-2">
+          <h1 className="text-[15px] font-extrabold text-slate-900 tracking-tight">
             {view === 'home' ? '📊 行业估值' : 
              view === 'ind' ? currentIndustries[navArgs[0]].nm :
              view === 'sub' ? currentIndustries[navArgs[0]].l2[navArgs[1]].nm :
              view === 'comp' ? navArgs[1] :
-             view === 'search' ? '🔍 搜索' :
-             view === 'ai' ? '🤖 AI 助手' : 
-             view === 'index' ? '📈 指数详情' : 
-             view === 'index_list' ? '📈 指数行情' :
-             view === 'index_detail' ? '📊 指数详情' : '⭐ 自选股'}
+             view === 'search' ? '搜索' :
+             view === 'ai' ? 'AI 助手' : 
+             view === 'index' ? '指数详情' : 
+             view === 'index_list' ? '指数行情' :
+             view === 'index_detail' ? '指数详情' : '自选股'}
           </h1>
         </div>
-        <button onClick={() => setShowSettings(true)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
-          <Settings size={20} />
+        <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all">
+          <Settings size={19} strokeWidth={2} />
         </button>
       </div>
 
@@ -1993,7 +2012,7 @@ export default function App() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 flex justify-around items-center py-2 px-4 pb-[calc(8px+env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(0,0,0,0.03)] z-50">
+      <nav className="fixed bottom-0 left-0 right-0 nav-bottom-glass flex justify-around items-center py-1.5 px-4 pb-[calc(6px+env(safe-area-inset-bottom))] z-50">
         {[
           { id: 'home', l: '行业', i: LayoutGrid },
           { id: 'index_list', l: '指数', i: TrendingUp },
@@ -2004,12 +2023,14 @@ export default function App() {
           <button
             key={t.id}
             onClick={() => { setView(t.id as ViewType); setNavStack([]); setNavArgs([]); }}
-            className={`flex flex-col items-center gap-1 flex-1 transition-all ${
-              view === t.id ? 'text-indigo-600' : 'text-slate-400'
+            className={`flex flex-col items-center gap-0.5 flex-1 py-1.5 rounded-xl transition-all duration-200 ${
+              view === t.id ? 'text-brand-600' : 'text-slate-400'
             }`}
           >
-            <t.i size={20} strokeWidth={view === t.id ? 2.5 : 2} />
-            <span className="text-[10px] font-bold">{t.l}</span>
+            <div className={`p-1 rounded-lg transition-all duration-200 ${view === t.id ? 'bg-brand-50' : ''}`}>
+              <t.i size={19} strokeWidth={view === t.id ? 2.5 : 1.8} />
+            </div>
+            <span className={`text-[10px] transition-all duration-200 ${view === t.id ? 'font-extrabold' : 'font-semibold'}`}>{t.l}</span>
           </button>
         ))}
       </nav>
@@ -2023,23 +2044,23 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowSettings(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+              className="absolute inset-0 modal-overlay"
             />
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="relative w-full max-w-lg bg-white rounded-t-[32px] p-6 pb-[calc(24px+env(safe-area-inset-bottom))] shadow-2xl"
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="relative w-full max-w-lg modal-sheet p-6 pb-[calc(24px+env(safe-area-inset-bottom))]"
             >
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
-              <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                <Settings className="text-indigo-600" /> 设置
+              <h2 className="text-lg font-extrabold text-slate-900 mb-6 flex items-center gap-2">
+                <Settings className="text-brand-500" size={20} /> 设置
               </h2>
               
               <div className="space-y-6">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">AI 服务商</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">AI 服务商</label>
                   <div className="grid grid-cols-2 gap-2">
                     {Object.entries(PROVIDERS).map(([id, p]) => (
                       <button
@@ -2050,11 +2071,13 @@ export default function App() {
                           apiUrl: config.apiUrl === '' || Object.values(PROVIDERS).some(prov => prov.url === config.apiUrl) ? p.url : config.apiUrl, 
                           model: p.model 
                         })}
-                        className={`p-3 border-2 rounded-2xl text-left transition-all ${
-                          config.provider === id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 bg-slate-50'
+                        className={`p-3 rounded-xl text-left transition-all duration-200 ${
+                          config.provider === id 
+                            ? 'border-2 border-brand-500 bg-brand-50 shadow-glow-sm' 
+                            : 'border border-slate-200/80 bg-surface hover:border-slate-300'
                         }`}
                       >
-                        <div className="text-sm font-bold text-slate-800">{p.name}</div>
+                        <div className={`text-sm font-bold ${config.provider === id ? 'text-brand-700' : 'text-slate-700'}`}>{p.name}</div>
                         <div className="text-[10px] text-slate-400 font-medium mt-0.5">{p.model}</div>
                       </button>
                     ))}
@@ -2063,31 +2086,31 @@ export default function App() {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">API 地址</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">API 地址</label>
                     <input
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors"
+                      className="input-field"
                       value={config.apiUrl}
                       placeholder={PROVIDERS[config.provider]?.url || "https://api.example.com"}
                       onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">API Key</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">API Key</label>
                     <input
                       type="password"
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors"
+                      className="input-field"
                       placeholder="sk-xxxxxxxx"
                       value={config.apiKey}
                       onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
                     />
-                    <p className="text-[10px] text-slate-400 mt-1.5 ml-1 flex items-center gap-1">
+                    <p className="text-[10px] text-slate-400 mt-2 ml-0.5 flex items-center gap-1">
                       <AlertCircle size={10} /> 你的 API 密钥仅保存在本地浏览器中
                     </p>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">模型名称</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-0.5">模型名称</label>
                     <input
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-500 transition-colors"
+                      className="input-field"
                       value={config.model}
                       onChange={(e) => setConfig({ ...config, model: e.target.value })}
                     />
@@ -2095,12 +2118,12 @@ export default function App() {
                 </div>
 
                 <div className="pt-4 border-t border-slate-100">
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">数据管理</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">数据管理</label>
                   <button
                     onClick={handleRestoreDefaults}
-                    className="w-full py-3.5 bg-red-50 text-red-600 rounded-2xl text-sm font-bold active:scale-95 transition-transform flex items-center justify-center gap-2"
+                    className="btn-danger w-full py-3 flex items-center justify-center gap-2"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
                     恢复默认公司数据
                   </button>
                   <p className="text-[10px] text-slate-400 mt-2 text-center">
@@ -2111,13 +2134,13 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <button
                     onClick={() => { setConfig(DEFAULT_CONFIG); localStorage.removeItem('iv_cfg'); }}
-                    className="py-3.5 bg-slate-100 text-slate-600 rounded-2xl text-sm font-bold active:scale-95 transition-transform"
+                    className="btn-secondary py-3"
                   >
                     恢复默认
                   </button>
                   <button
                     onClick={() => setShowSettings(false)}
-                    className="py-3.5 bg-indigo-600 text-white rounded-2xl text-sm font-bold shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
+                    className="btn-primary py-3"
                   >
                     完成
                   </button>
