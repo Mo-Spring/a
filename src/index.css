@@ -45,24 +45,25 @@
 
   /* ===== Dark Mode ===== */
   .dark {
-    --color-surface: #0f172a;
-    --color-surface-raised: #1e293b;
-    --color-text-primary: #f1f5f9;
-    --color-text-secondary: #94a3b8;
-    --color-text-muted: #64748b;
-    --color-border: rgba(148, 163, 184, 0.12);
-    --color-border-strong: rgba(148, 163, 184, 0.2);
-    --color-brand-glow: rgba(99, 102, 241, 0.25);
-    --color-brand-subtle: rgba(99, 102, 241, 0.1);
-    --color-bull-bg: rgba(16, 185, 129, 0.12);
-    --color-bear-bg: rgba(239, 68, 68, 0.12);
-    --color-neutral-bg: rgba(245, 158, 11, 0.12);
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-    --shadow-lg: 0 10px 24px -4px rgba(0, 0, 0, 0.35), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.2), 0 6px 16px rgba(0, 0, 0, 0.15);
-    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.3), 0 12px 28px rgba(0, 0, 0, 0.2);
+    --color-surface: #111827;
+    --color-surface-raised: #1f2937;
+    --color-text-primary: #f9fafb;
+    --color-text-secondary: #9ca3af;
+    --color-text-muted: #6b7280;
+    --color-border: rgba(255, 255, 255, 0.08);
+    --color-border-strong: rgba(255, 255, 255, 0.14);
+    --color-brand-glow: rgba(99, 102, 241, 0.2);
+    --color-brand-subtle: rgba(99, 102, 241, 0.12);
+    --color-bull-bg: rgba(16, 185, 129, 0.15);
+    --color-bear-bg: rgba(239, 68, 68, 0.15);
+    --color-neutral-bg: rgba(245, 158, 11, 0.15);
+    /* 暗色模式弱化阴影，用边框代替层级 */
+    --shadow-xs: none;
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-lg: none;
+    --shadow-card: none;
+    --shadow-card-hover: none;
   }
 
   html {
@@ -125,8 +126,15 @@
   }
 
   .dark .card-glass {
-    background: rgba(30, 41, 59, 0.8);
-    border: 1px solid rgba(148, 163, 184, 0.1);
+    background: rgba(31, 41, 55, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* 暗色模式卡片边框加强层级感 */
+  .dark .card,
+  .dark .card-interactive,
+  .dark .card-elevated {
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   /* === 玻璃拟态导航栏 === */
@@ -138,8 +146,8 @@
   }
 
   .dark .nav-glass {
-    background: rgba(15, 23, 42, 0.85);
-    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+    background: rgba(17, 24, 39, 0.88);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .nav-bottom-glass {
@@ -151,9 +159,9 @@
   }
 
   .dark .nav-bottom-glass {
-    background: rgba(15, 23, 42, 0.9);
-    border-top: 1px solid rgba(148, 163, 184, 0.06);
-    box-shadow: 0 -1px 24px rgba(0, 0, 0, 0.3);
+    background: rgba(17, 24, 39, 0.92);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: none;
   }
 
   /* === 按钮系统 === */
@@ -271,12 +279,8 @@
   /* === 数据统计网格 === */
   .stat-cell {
     @apply rounded-xl p-2.5 text-center;
-    background: var(--color-surface);
-    border: 1px solid rgba(148, 163, 184, 0.08);
-  }
-
-  .dark .stat-cell {
-    border: 1px solid rgba(148, 163, 184, 0.06);
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-border);
   }
 
   .stat-label {
@@ -318,7 +322,8 @@
   }
 
   .dark .modal-sheet {
-    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   /* === 淡入淡出动画 === */
@@ -468,55 +473,99 @@
 .dark .bg-white\/80,
 .dark .bg-white\/90,
 .dark .bg-white\/70 {
-  background-color: var(--color-surface-raised) !important;
+  background-color: var(--color-surface-raised);
 }
 
-.dark .bg-slate-50,
+.dark .bg-slate-50 {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
 .dark .bg-slate-100 {
-  background-color: rgba(30, 41, 59, 0.6) !important;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.dark .bg-indigo-50 {
+  background-color: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.15);
+}
+
+.dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+.dark .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+
+.dark .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.12);
 }
 
 .dark .text-slate-900,
 .dark .text-slate-800 {
-  color: #f1f5f9 !important;
+  color: #f3f4f6;
 }
 
 .dark .text-slate-700,
 .dark .text-slate-600 {
-  color: #cbd5e1 !important;
+  color: #d1d5db;
 }
 
 .dark .text-slate-500,
 .dark .text-slate-400 {
-  color: #94a3b8 !important;
+  color: #9ca3af;
 }
 
 .dark .text-slate-300 {
-  color: #64748b !important;
+  color: #6b7280;
 }
 
 .dark .border-slate-200\/60,
-.dark .border-slate-200 {
-  border-color: rgba(148, 163, 184, 0.12) !important;
+.dark .border-slate-200,
+.dark .border-slate-100\/80,
+.dark .border-slate-100 {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .border-indigo-100 {
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.dark .border-indigo-500 {
+  border-color: rgba(99, 102, 241, 0.5);
 }
 
 .dark .hover\:bg-slate-100\/60:hover {
-  background-color: rgba(30, 41, 59, 0.6) !important;
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .dark .shadow-card {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 6px 16px rgba(0,0,0,0.15) !important;
+  box-shadow: none;
+}
+
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg {
+  box-shadow: none;
 }
 
 /* 输入框暗色 */
 .dark input,
 .dark textarea,
 .dark select {
-  background-color: var(--color-surface) !important;
-  color: var(--color-text-primary) !important;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px var(--color-brand-glow);
 }
 
 /* 暗色模式下设置面板 */
 .dark .modal-overlay {
-  background: rgba(0, 0, 0, 0.6) !important;
+  background: rgba(0, 0, 0, 0.6);
 }
