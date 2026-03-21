@@ -989,12 +989,17 @@ export default function App() {
           if (d.data) {
             const pScale = mk === '116' ? 1000 : 100;
             const pVal = d.data.f43 !== undefined && d.data.f43 !== '-' ? d.data.f43 : (d.data.f2 !== undefined && d.data.f2 !== '-' ? d.data.f2 : d.data.f60);
-            const chVal = d.data.f170 !== undefined && d.data.f170 !== '-' ? d.data.f170 : d.data.f4;
-            const cpVal = d.data.f171 !== undefined && d.data.f171 !== '-' ? d.data.f171 : d.data.f3;
+            const chVal = d.data.f4 !== undefined && d.data.f4 !== '-' ? d.data.f4 : d.data.f170;
+            // 优先用 f3（标准涨跌幅%），f171 有时返回错误值
+            const rawCp = d.data.f3 !== undefined && d.data.f3 !== '-' ? d.data.f3 : d.data.f171;
 
             const p = pVal !== undefined && pVal !== '-' ? (pVal / pScale).toFixed(mk === '116' ? 3 : 2) : '—';
             const ch = chVal !== undefined && chVal !== '-' ? (chVal / pScale).toFixed(mk === '116' ? 3 : 2) : '—';
-            const cp = cpVal !== undefined && cpVal !== '-' ? (cpVal / 100).toFixed(2) : '—';
+            // 涨跌幅：如果 API 返回的为 0 但有价格和昨收，手动计算
+            let cp = rawCp !== undefined && rawCp !== '-' ? (rawCp / 100).toFixed(2) : '—';
+            if (cp === '0.00' && pVal > 0 && d.data.f60 > 0) {
+              cp = (((pVal - d.data.f60) / d.data.f60) * 100).toFixed(2);
+            }
             
             const pe = d.data.f162 !== '-' && d.data.f162 !== undefined && d.data.f162 > 0 ? (d.data.f162 / 100).toFixed(2) : (d.data.f9 !== '-' && d.data.f9 !== undefined && d.data.f9 > 0 ? (d.data.f9 / 100).toFixed(2) : undefined);
             const pb = d.data.f167 !== '-' && d.data.f167 !== undefined && d.data.f167 > 0 ? (d.data.f167 / 100).toFixed(2) : (d.data.f23 !== '-' && d.data.f23 !== undefined && d.data.f23 > 0 ? (d.data.f23 / 100).toFixed(2) : undefined);
@@ -1010,7 +1015,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f116,f9,f23,f60&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f116,f9,f23,f60,f169&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.error('Failed to fetch price');
@@ -1529,10 +1534,9 @@ export default function App() {
                 {(() => {
                   const cp = (livePrice && livePrice.cp !== '—') ? livePrice.cp : batchData[tCode]?.cp;
                   const up = cp ? parseFloat(cp) >= 0 : false;
-                  const ch = (livePrice && livePrice.ch !== '—') ? livePrice.ch : null;
                   return cp ? (
                     <span className={`text-xs font-bold px-2 py-0.5 rounded ${up ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                      {up ? '+' : ''}{ch ? `${ch}(${up ? '+' : ''}${cp}%)` : `${up ? '+' : ''}${cp}%`}
+                      {up ? '+' : ''}{cp}%
                     </span>
                   ) : null;
                 })()}
