@@ -1172,7 +1172,7 @@ export default function App() {
           <div className="text-xl font-extrabold text-brand-600 tabular-nums">{currentIndustries.length}</div>
         </div>
         <div className="stat-cell">
-          <div className="stat-label">龙头公司</div>
+          <div className="stat-label">相关公司</div>
           <div className="text-xl font-extrabold text-cyan-600 tabular-nums">
             {currentIndustries.reduce((a, i) => a + i.l2.reduce((b, s) => b + (s.cs || []).length, 0), 0)}
           </div>
@@ -1380,7 +1380,7 @@ export default function App() {
 
         {/* Company Cards */}
         <div className="space-y-2.5">
-          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">龙头公司</h3>
+          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">相关公司</h3>
           {ind.l2.flatMap(s => s.cs.map(c => ({ ...c, sn: s.nm }))).map(c => (
             <div
               key={`${c.market || 'A'}-${c.c}`}
