@@ -297,7 +297,7 @@ const SearchView = ({
 interface IndexDetailViewProps {
   idx: Index;
   batchData: Record<string, any>;
-  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string }>;
+  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>;
   setView: (view: ViewType) => void;
   toggleFav: (code: string, type: 'stock' | 'index', e?: React.MouseEvent) => void;
   favIndices: string[];
@@ -504,6 +504,35 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
             {iv?.peg && iv.peg > 0 && iv.peg < 1 ? ' PEG<1，盈利增速快于估值，值得关注。' : ''}
           </p>
         </div>
+
+        {/* 历史均值对比 */}
+        {(djIv?.peOverHistory !== undefined || djIv?.pbOverHistory !== undefined) && (
+          <div className="grid grid-cols-2 gap-4">
+            {djIv?.peOverHistory !== undefined && (
+              <div className="bg-slate-50 rounded-2xl p-4">
+                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE / 历史均值</div>
+                <div className={`text-2xl font-bold ${djIv.peOverHistory < 0.8 ? 'text-emerald-600' : djIv.peOverHistory > 1.2 ? 'text-red-600' : 'text-amber-600'}`}>
+                  {(djIv.peOverHistory * 100).toFixed(1)}%
+                </div>
+              </div>
+            )}
+            {djIv?.pbOverHistory !== undefined && (
+              <div className="bg-slate-50 rounded-2xl p-4">
+                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB / 历史均值</div>
+                <div className={`text-2xl font-bold ${djIv.pbOverHistory < 0.8 ? 'text-emerald-600' : djIv.pbOverHistory > 1.2 ? 'text-red-600' : 'text-amber-600'}`}>
+                  {(djIv.pbOverHistory * 100).toFixed(1)}%
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 数据来源 */}
+        {djIv?.date && (
+          <div className="text-center text-[10px] text-slate-400 font-medium">
+            数据更新于 {djIv.date} · 来源：蛋卷基金
+          </div>
+        )}
       </div>
     </div>
   );
@@ -557,7 +586,7 @@ export default function App() {
   const [isAddingCompany, setIsAddingCompany] = useState(false);
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; p?: string; cp?: string }>>({});
-  const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string }>>({});
+  const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('iv_dark');
     if (saved !== null) return saved === 'true';
@@ -841,6 +870,10 @@ export default function App() {
               peg: match.peg > 0 ? match.peg : undefined,
               evaType: match.eva_type || undefined,
               bondYield: match.bond_yeild > 0 ? match.bond_yeild : undefined,
+              peOverHistory: match.pe_over_history > 0 ? match.pe_over_history : undefined,
+              pbOverHistory: match.pb_over_history > 0 ? match.pb_over_history : undefined,
+              evaTypeInt: match.eva_type_int !== undefined ? match.eva_type_int : undefined,
+              date: match.date || undefined,
             };
           }
         }
@@ -2156,18 +2189,11 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 key={idx.c}
                 onClick={() => navigate('index_detail', idx)}
-                className="card-interactive p-4 relative overflow-hidden"
+                className="card-interactive p-4"
               >
-                {/* Header: name + change + valuation badge */}
-                <div className="flex justify-between items-center mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
-                    {bd?.cp && (
-                      <span className={`text-[10px] font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                        {parseFloat(bd.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
-                      </span>
-                    )}
-                  </div>
+                {/* Row 1: name + valuation badge */}
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
                   {iv?.evaType && (
                     <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
                       {evText(iv.evaType)}
@@ -2175,42 +2201,16 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Stats grid: PE / PB / 股息率 */}
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">PE</div>
-                    <div className="stat-value">{iv?.pe !== undefined ? iv.pe.toFixed(2) : bd?.pe || '—'}</div>
+                {/* Row 2: price + change + actions */}
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
+                    {bd?.cp && (
+                      <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
+                      </span>
+                    )}
                   </div>
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">PB</div>
-                    <div className="stat-value">{iv?.pb !== undefined ? iv.pb.toFixed(2) : bd?.pb || '—'}</div>
-                  </div>
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">股息率</div>
-                    <div className="stat-value">{iv?.dy !== undefined ? `${(iv.dy * 100).toFixed(2)}%` : '—'}</div>
-                  </div>
-                </div>
-
-                {/* PE percentile progress bar */}
-                {iv?.pePct !== undefined && (
-                  <div className="flex items-center gap-2 text-[10px] mb-2">
-                    <span className="text-slate-400 font-bold w-10">PE%位</span>
-                    <div className="progress-bar flex-1">
-                      <div
-                        className="progress-bar-fill"
-                        style={{
-                          width: `${Math.min(iv.pePct * 100, 100)}%`,
-                          background: iv.pePct < 0.3 ? 'linear-gradient(90deg, #10b981, #34d399)' : iv.pePct < 0.7 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)'
-                        }}
-                      />
-                    </div>
-                    <span className={`w-8 text-right font-bold tabular-nums ${pColor(iv.pePct * 100)}`}>{(iv.pePct * 100).toFixed(0)}%</span>
-                  </div>
-                )}
-
-                {/* Footer: code + actions */}
-                <div className="flex justify-between items-center mt-1">
-                  <div className="text-[10px] text-slate-400 font-mono">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '国外'}</div>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => {
@@ -2234,6 +2234,22 @@ export default function App() {
                     >
                       {favIndices.includes(idx.c) ? <Star fill="currentColor" size={14} /> : <Star size={14} />}
                     </button>
+                  </div>
+                </div>
+
+                {/* Row 3: PE% / ROE / 股息率 */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">PE%</div>
+                    <div className="stat-value">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(2)}%` : '—'}</div>
+                  </div>
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">ROE</div>
+                    <div className="stat-value">{iv?.roe !== undefined ? `${(iv.roe * 100).toFixed(2)}%` : '—'}</div>
+                  </div>
+                  <div className="stat-cell py-2">
+                    <div className="stat-label">股息率</div>
+                    <div className="stat-value">{iv?.dy !== undefined ? `${(iv.dy * 100).toFixed(2)}%` : '—'}</div>
                   </div>
                 </div>
               </motion.div>
