@@ -454,13 +454,13 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [livePrice, setLivePrice] = useState<{ 
     p: string; ch: string; cp: string; up: boolean;
-    pe?: string; pb?: string; dy?: string; mcap?: string;
+    pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string;
   } | null>(null);
   const [customCompanies, setCustomCompanies] = useState<any[]>(() => JSON.parse(localStorage.getItem('iv_custom_comps') || '[]'));
   const [deletedCompanies, setDeletedCompanies] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_deleted_comps') || '[]'));
   const [isAddingCompany, setIsAddingCompany] = useState(false);
   const [aiAddError, setAiAddError] = useState<string | null>(null);
-  const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; mcap?: number; p?: string; cp?: string }>>({});
+  const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; p?: string; cp?: string }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('iv_dark');
@@ -654,12 +654,13 @@ export default function App() {
                 const pe = item.f162 !== '-' && item.f162 !== undefined && item.f162 > 0 ? item.f162 / 100 : (item.f9 !== '-' && item.f9 !== undefined && item.f9 > 0 ? item.f9 / 100 : undefined);
                 const pb = item.f167 !== '-' && item.f167 !== undefined && item.f167 > 0 ? item.f167 / 100 : (item.f23 !== '-' && item.f23 !== undefined && item.f23 > 0 ? item.f23 / 100 : undefined);
                 const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
+                const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
                 const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
                 
                 const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
                 const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
                 
-                newData[code] = { pe, pb, dy, mcap, p, cp };
+                newData[code] = { pe, pb, dy, ps, mcap, p, cp };
               });
               return newData;
             });
@@ -671,7 +672,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173,f188&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           delete (window as any)[cbName];
@@ -1004,9 +1005,10 @@ export default function App() {
             const pe = d.data.f162 !== '-' && d.data.f162 !== undefined && d.data.f162 > 0 ? (d.data.f162 / 100).toFixed(2) : (d.data.f9 !== '-' && d.data.f9 !== undefined && d.data.f9 > 0 ? (d.data.f9 / 100).toFixed(2) : undefined);
             const pb = d.data.f167 !== '-' && d.data.f167 !== undefined && d.data.f167 > 0 ? (d.data.f167 / 100).toFixed(2) : (d.data.f23 !== '-' && d.data.f23 !== undefined && d.data.f23 > 0 ? (d.data.f23 / 100).toFixed(2) : undefined);
             const dy = d.data.f173 !== '-' && d.data.f173 !== undefined ? (d.data.f173 / 100).toFixed(2) : undefined;
+            const ps = d.data.f188 !== '-' && d.data.f188 !== undefined && d.data.f188 > 0 ? (d.data.f188 / 100).toFixed(2) : undefined;
             const mcap = d.data.f116 !== '-' && d.data.f116 !== undefined ? (d.data.f116 / 100000000).toFixed(2) : undefined;
 
-            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, mcap });
+            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap });
           }
           delete (window as any)[cbName];
           const scriptEl = document.getElementById(cbName);
@@ -1015,7 +1017,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f116,f9,f23,f60,f169&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f9,f23,f60,f169&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.error('Failed to fetch price');
@@ -1360,7 +1362,7 @@ export default function App() {
                   { l: 'PB', v: batchData[c.c]?.pb || c.pb },
                   { l: 'ROE', v: `${c.roe}%` },
                   { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
-                  { l: 'PS', v: c.ps },
+                  { l: 'PS', v: batchData[c.c]?.ps || c.ps },
                 ].map(m => (
                   <div key={m.l} className="stat-cell py-1.5">
                     <div className="stat-label text-[7px]">{m.l}</div>
@@ -1422,7 +1424,7 @@ export default function App() {
                   { l: 'PB', v: batchData[c.c]?.pb || c.pb },
                   { l: 'ROE', v: `${c.roe}%` },
                   { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
-                  { l: 'PS', v: c.ps },
+                  { l: 'PS', v: batchData[c.c]?.ps || c.ps },
                 ].map(m => (
                   <div key={m.l} className="bg-slate-50 rounded-lg py-1 text-center">
                     <div className="text-[8px] text-slate-400 font-bold uppercase">{m.l}</div>
@@ -1572,8 +1574,8 @@ export default function App() {
               { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb || c.pb },
               { l: 'ROE', v: `${c.roe}%` },
               { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || c.dy}%` },
+              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || c.ps || '—' },
               { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
-              { l: 'WACC', v: `${(wacc * 100).toFixed(1)}%` },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
                 <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
