@@ -213,9 +213,9 @@ const SearchView = ({
                 </div>
                 <div className="grid grid-cols-3 gap-1">
                   {[
-                    { l: 'PE', v: c.pe || '—' },
-                    { l: 'ROE', v: `${c.roe}%` },
-                    { l: '股息', v: `${c.dy}%` },
+                    { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
+                    { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
+                    { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
                   ].map(m => (
                     <div key={m.l} className="bg-slate-50 rounded-lg py-1.5 text-center">
                       <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
@@ -677,7 +677,7 @@ export default function App() {
     marketCustom.forEach(cc => {
       let ind = filteredMerged.find(i => i.nm === (cc.indName || '其他行业'));
       if (!ind) {
-        ind = { id: `custom_${Date.now()}_${Math.random()}`, nm: cc.indName || '其他行业', ic: cc.ic || '🏢', ev: 'mid', l2: [], pe: 20, pb: 2, pp: 0, bp: 0, roe: 15, dy: 2, an: '自定义添加的行业' };
+        ind = { id: `custom_${Date.now()}_${Math.random()}`, nm: cc.indName || '其他行业', ic: cc.ic || '🏢', ev: 'mid', l2: [] };
         filteredMerged.push(ind);
       }
       let sub = ind.l2.find(s => s.nm === (cc.subIndName || '其他细分'));
@@ -687,7 +687,7 @@ export default function App() {
       }
       if (!sub.cs.find(x => x.c === cc.c)) {
         sub.cs.push({
-          c: cc.c, n: cc.n, pe: Number(cc.pe) || 0, pb: Number(cc.pb) || 0, roe: Number(cc.roe) || 0, dy: Number(cc.dy) || 0, ps: Number(cc.ps) || 0, market: cc.market
+          c: cc.c, n: cc.n, market: cc.market
         });
       }
     });
@@ -886,12 +886,16 @@ export default function App() {
         setStockDetailData(prev => ({ ...prev, [code]: data }));
 
         // 计算增强估值
-        // 找行业 PE
+        // 找行业 PE（从 batchData 计算行业平均）
         let industryPE = 20;
         for (const ind of allIndustries) {
           for (const sub of ind.l2) {
             if (sub.cs.find(c => c.c === code)) {
-              industryPE = ind.pe || 20;
+              // 从该行业成分股的 batchData 计算平均 PE
+              const peValues = sub.cs
+                .map(c => batchData[c.c]?.pe)
+                .filter((v): v is number => v !== undefined && v > 0 && v < 500);
+              industryPE = peValues.length > 0 ? peValues.reduce((a, b) => a + b, 0) / peValues.length : 20;
               break;
             }
           }
@@ -1315,11 +1319,11 @@ export default function App() {
     if (ind.bk && batchData[ind.bk]) {
       const bkd = batchData[ind.bk];
       return {
-        pe: bkd.pe || ind.pe,
-        pb: bkd.pb || ind.pb,
-        dy: bkd.dy || ind.dy,
+        pe: bkd.pe,
+        pb: bkd.pb,
+        dy: bkd.dy,
         cp: bkd.cp,
-        roe: (bkd.pe && bkd.pb && Number(bkd.pe) > 0) ? ((Number(bkd.pb) / Number(bkd.pe)) * 100).toFixed(1) : ind.roe,
+        roe: (bkd.pe && bkd.pb && Number(bkd.pe) > 0) ? ((Number(bkd.pb) / Number(bkd.pe)) * 100).toFixed(1) : undefined,
         source: 'index'
       };
     }
@@ -1330,9 +1334,9 @@ export default function App() {
     ind.l2.forEach(sub => {
       sub.cs.forEach(c => {
         const bd = batchData[c.c];
-        const pe = bd?.pe ? parseFloat(bd.pe) : c.pe;
-        const pb = bd?.pb ? parseFloat(bd.pb) : c.pb;
-        const dy = bd?.dy ? parseFloat(bd.dy) : c.dy;
+        const pe = bd?.pe ? parseFloat(bd.pe) : undefined;
+        const pb = bd?.pb ? parseFloat(bd.pb) : undefined;
+        const dy = bd?.dy ? parseFloat(bd.dy) : undefined;
         const mcap = bd?.mcap ? parseFloat(bd.mcap) : 1;
         const cp = bd?.cp ? parseFloat(bd.cp) : undefined;
 
@@ -1343,11 +1347,11 @@ export default function App() {
       });
     });
 
-    const avgPE = peCount > 0 ? (totalPE / peCount).toFixed(1) : ind.pe;
-    const avgPB = pbCount > 0 ? (totalPB / pbCount).toFixed(2) : ind.pb;
-    const avgDY = dyCount > 0 ? (totalDY / dyCount).toFixed(2) : ind.dy;
+    const avgPE = peCount > 0 ? (totalPE / peCount).toFixed(1) : undefined;
+    const avgPB = pbCount > 0 ? (totalPB / pbCount).toFixed(2) : undefined;
+    const avgDY = dyCount > 0 ? (totalDY / dyCount).toFixed(2) : undefined;
     const avgCP = cpCount > 0 ? (totalCP / cpCount).toFixed(2) : undefined;
-    const avgROE = (avgPE && avgPB && Number(avgPE) > 0) ? ((Number(avgPB) / Number(avgPE)) * 100).toFixed(1) : ind.roe;
+    const avgROE = (avgPE && avgPB && Number(avgPE) > 0) ? ((Number(avgPB) / Number(avgPE)) * 100).toFixed(1) : undefined;
 
     return { pe: avgPE, pb: avgPB, roe: avgROE, dy: avgDY, cp: avgCP, source: 'calc' };
   };
@@ -1458,19 +1462,6 @@ export default function App() {
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 text-[10px] mb-2.5">
-              <span className="text-slate-400 font-bold w-10">PE%位</span>
-              <div className="progress-bar flex-1">
-                <div 
-                  className="progress-bar-fill" 
-                  style={{ 
-                    width: `${Math.min(ind.pp, 100)}%`,
-                    background: ind.pp < 30 ? 'linear-gradient(90deg, #10b981, #34d399)' : ind.pp < 70 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)'
-                  }} 
-                />
-              </div>
-              <span className={`w-8 text-right font-bold tabular-nums ${pColor(ind.pp)}`}>{ind.pp}%</span>
-            </div>
             <div className="flex flex-wrap gap-1.5">
               {ind.l2.map(s => (
                 <span key={s.nm} className="text-[9px] px-2 py-0.5 bg-surface text-slate-500 border border-slate-100/80 rounded-md font-semibold">
@@ -1549,21 +1540,15 @@ export default function App() {
           <div className="grid grid-cols-3 gap-2 mb-4">
             {[
               { label: 'PE', val: indVal.pe || '—' },
-              { label: 'PB', val: indVal.pb },
-              { label: 'ROE', val: `${indVal.roe}%` },
-              { label: '股息率', val: `${indVal.dy}%` },
-              { label: 'PE%位', val: `${ind.pp}%`, color: pColor(ind.pp) },
-              { label: 'PB%位', val: `${ind.bp}%`, color: pColor(ind.bp) },
+              { label: 'PB', val: indVal.pb || '—' },
+              { label: 'ROE', val: indVal.roe ? `${indVal.roe}%` : '—' },
+              { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '—' },
             ].map(m => (
               <div key={m.label} className="stat-cell">
                 <div className="stat-label">{m.label}</div>
                 <div className={`stat-value ${m.color || ''}`}>{m.val}</div>
               </div>
             ))}
-          </div>
-          
-          <div className="p-3.5 bg-brand-50/50 border-l-[3px] border-brand-400 rounded-r-xl text-[13px] text-slate-600 leading-relaxed">
-            {ind.an}
           </div>
         </div>
 
@@ -1612,11 +1597,11 @@ export default function App() {
               </div>
               <div className="grid grid-cols-5 gap-1.5">
                 {[
-                  { l: 'PE', v: batchData[c.c]?.pe || c.pe || '—' },
-                  { l: 'PB', v: batchData[c.c]?.pb || c.pb },
-                  { l: 'ROE', v: `${c.roe}%` },
-                  { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
-                  { l: 'PS', v: batchData[c.c]?.ps || c.ps },
+                  { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
+                  { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
+                  { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
+                  { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
+                  { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
                 ].map(m => (
                   <div key={m.l} className="stat-cell py-1.5">
                     <div className="stat-label text-[7px]">{m.l}</div>
@@ -1674,11 +1659,11 @@ export default function App() {
               </div>
               <div className="grid grid-cols-5 gap-1">
                 {[
-                  { l: 'PE', v: batchData[c.c]?.pe || c.pe || '—' },
-                  { l: 'PB', v: batchData[c.c]?.pb || c.pb },
-                  { l: 'ROE', v: `${c.roe}%` },
-                  { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
-                  { l: 'PS', v: batchData[c.c]?.ps || c.ps },
+                  { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
+                  { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
+                  { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
+                  { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
+                  { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
                 ].map(m => (
                   <div key={m.l} className="bg-slate-50 rounded-lg py-1 text-center">
                     <div className="text-[8px] text-slate-400 font-bold uppercase">{m.l}</div>
@@ -1729,12 +1714,12 @@ export default function App() {
     const valResult = valuationResults[tCode];
 
     const currentPE = realtimeData?.pe && realtimeData.pe > 0 ? realtimeData.pe
-      : (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || c.pe || 0));
+      : (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
     const currentPB = realtimeData?.pb && realtimeData.pb > 0 ? realtimeData.pb
-      : (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || c.pb || 0));
+      : (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
     const currentDY = realtimeData?.dy ? realtimeData.dy
-      : (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || c.dy || 0));
-    const currentROE = realtimeData?.roe || batchData[tCode]?.roe || c.roe || 0;
+      : (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
+    const currentROE = realtimeData?.roe || batchData[tCode]?.roe || 0;
     const currentEPS = realtimeData?.eps || 0;
     const currentBVPS = realtimeData?.bvps || 0;
     const currentPrice = realtimeData?.price && realtimeData.price > 0 ? realtimeData.price
@@ -1766,7 +1751,7 @@ export default function App() {
       for (let y = 1; y <= yrs; y++) dcf += eps * Math.pow(1 + growth, y) / Math.pow(1 + wacc, y);
       dcf += (eps * Math.pow(1 + growth, yrs) * (1 + tg)) / (wacc - tg) / Math.pow(1 + wacc, yrs);
       dcfPE = eps > 0 ? (dcf / eps) : 0;
-      const indPE = ind.pe || 20;
+      const indPE = 20; // 默认值，增强估值用 valuationService 计算的行业 PE
       peFairPE = indPE * (currentROE / 15);
       const gROE = currentROE / 100, gG = Math.min(gROE * 0.3, 0.04);
       pbFair = gROE > 0 ? ((gROE - gG) / (wacc - gG)) : 0;
@@ -1860,11 +1845,11 @@ export default function App() {
 
           <div className="grid grid-cols-3 gap-2">
             {[
-              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe || c.pe || '—' },
-              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb || c.pb },
-              { l: 'ROE', v: `${currentROE}%` },
-              { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || c.dy}%` },
-              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || c.ps || '—' },
+              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe || '—' },
+              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb || '—' },
+              { l: 'ROE', v: currentROE > 0 ? `${currentROE}%` : '—' },
+              { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || '—'}%` },
+              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || '—' },
               { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
               { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : '—' },
             ].map(m => (
@@ -2670,11 +2655,11 @@ export default function App() {
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {[
-                { l: 'PE', v: batchData[c.c]?.pe || c.pe || '—' },
-                { l: 'PB', v: batchData[c.c]?.pb || c.pb },
-                { l: 'ROE', v: `${c.roe}%` },
-                { l: '股息', v: `${batchData[c.c]?.dy || c.dy}%` },
-                { l: 'PS', v: batchData[c.c]?.ps || c.ps },
+                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
+                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
+                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
+                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
+                { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
               ].map(m => (
                 <div key={m.l} className="stat-cell py-1.5">
                   <div className="stat-label text-[7px]">{m.l}</div>
