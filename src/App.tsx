@@ -24,7 +24,10 @@ import {
   MoreVertical,
   Moon,
   Sun,
-  GripVertical
+  GripVertical,
+  CheckSquare,
+  Square,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Industry, Company, AIConfig, ViewType, NavigationState, Index } from './types';
@@ -1203,16 +1206,20 @@ export default function App() {
   }, [view, navArgs]);
 
   const handleDeleteCompany = (code: string) => {
-    if (!window.confirm('确定删除该公司吗？')) return;
-    const newDeleted = [...deletedCompanies, code];
-    setDeletedCompanies(newDeleted);
-    localStorage.setItem('iv_deleted_comps', JSON.stringify(newDeleted));
-    
-    const newCustom = customCompanies.filter(c => c.c !== code);
-    setCustomCompanies(newCustom);
-    localStorage.setItem('iv_custom_comps', JSON.stringify(newCustom));
-    
-    setView('home');
+    setConfirmDialog({
+      title: '删除公司',
+      message: '确定删除该公司吗？删除后可通过设置恢复。',
+      onConfirm: () => {
+        const newDeleted = [...deletedCompanies, code];
+        setDeletedCompanies(newDeleted);
+        localStorage.setItem('iv_deleted_comps', JSON.stringify(newDeleted));
+        const newCustom = customCompanies.filter(c => c.c !== code);
+        setCustomCompanies(newCustom);
+        localStorage.setItem('iv_custom_comps', JSON.stringify(newCustom));
+        setView('home');
+        setConfirmDialog(null);
+      }
+    });
   };
 
   const handleRestoreDefaults = () => {
@@ -1222,6 +1229,20 @@ export default function App() {
     localStorage.removeItem('iv_deleted_comps');
     setView('home');
     setShowSettings(false);
+  };
+
+  const handleRestoreDefaultIndices = () => {
+    setConfirmDialog({
+      title: '恢复默认指数',
+      message: '将重置为系统默认指数列表，你手动添加的指数会被移除。',
+      onConfirm: () => {
+        setIndices([...DEFAULT_INDICES]);
+        localStorage.setItem('iv_indices', JSON.stringify(DEFAULT_INDICES));
+        setFavIndices([]);
+        localStorage.setItem('iv_fav_indices', JSON.stringify([]));
+        setConfirmDialog(null);
+      }
+    });
   };
 
   const getIndustryValuation = (ind: Industry) => {
@@ -2265,11 +2286,16 @@ export default function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`确定删除 "${idx.n}" 吗？`)) {
-                          const newIndices = indices.filter(i => i.c !== idx.c);
-                          setIndices(newIndices);
-                          localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-                        }
+                        setConfirmDialog({
+                          title: '删除指数',
+                          message: `确定删除 "${idx.n}" 吗？`,
+                          onConfirm: () => {
+                            const newIndices = indices.filter(i => i.c !== idx.c);
+                            setIndices(newIndices);
+                            localStorage.setItem('iv_indices', JSON.stringify(newIndices));
+                            setConfirmDialog(null);
+                          }
+                        });
                       }}
                       className="p-2 text-slate-300 hover:text-red-500 transition-colors"
                     >
@@ -2323,6 +2349,9 @@ export default function App() {
   const [favTab, setFavTab] = useState<'stocks' | 'indices'>('stocks');
   const [dragMode, setDragMode] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const reorderFavStocks = (fromIdx: number, toIdx: number) => {
@@ -2414,7 +2443,7 @@ export default function App() {
             onPointerUp={handleLongPressEnd}
             onPointerLeave={handleLongPressEnd}
             onClick={() => { if (!dragMode) { setMarket(c.market || 'A'); navigate('comp', c.c, c.n); } }}
-            className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''}`}
+            className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''} ${selectMode && selectedItems.has(c.c) ? 'ring-2 ring-brand-500 bg-brand-50/30' : ''}`}
             style={{ touchAction: dragMode ? 'none' : 'auto' }}
           >
             {dragMode && (
@@ -2428,7 +2457,7 @@ export default function App() {
                 <div className="text-[10px] text-slate-400 font-mono mt-0.5">{c.c} · {c.sn}</div>
               </div>
               <div className="flex items-center gap-1">
-                {batchData[c.c] && batchData[c.c].p && (
+                {batchData[c.c] && batchData[c.c].p && !selectMode && (
                   <div className="text-right">
                     <div className="text-[13px] font-bold text-slate-900 tabular-nums">¥{batchData[c.c].p}</div>
                     <div className={`text-[10px] font-bold tabular-nums ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
@@ -2436,9 +2465,18 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                <button onClick={(e) => toggleFav(c.c, 'stock', e)} className="p-1.5 text-amber-400 ml-1">
-                  <Star fill="currentColor" size={18} />
-                </button>
+                {selectMode ? (
+                  <button onClick={(e) => { e.stopPropagation(); toggleSelectItem(c.c); }} className="p-1.5">
+                    {selectedItems.has(c.c)
+                      ? <CheckSquare size={20} className="text-brand-500" />
+                      : <Square size={20} className="text-slate-300" />
+                    }
+                  </button>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); handleSingleUnfav(c.c, c.n, 'stock'); }} className="p-1.5 text-amber-400 ml-1">
+                    <Star fill="currentColor" size={18} />
+                  </button>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-5 gap-1.5">
@@ -2491,7 +2529,7 @@ export default function App() {
               onPointerUp={handleLongPressEnd}
               onPointerLeave={handleLongPressEnd}
               onClick={() => { if (!dragMode) navigate('index_detail', idx); }}
-              className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''}`}
+              className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''} ${selectMode && selectedItems.has(idx.c) ? 'ring-2 ring-brand-500 bg-brand-50/30' : ''}`}
               style={{ touchAction: dragMode ? 'none' : 'auto' }}
             >
               {dragMode && (
@@ -2503,15 +2541,24 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
                   <span className="text-[10px] text-slate-400 font-mono">{idx.c}</span>
-                  {iv?.evaType && (
+                  {iv?.evaType && !selectMode && (
                     <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
                       {evText(iv.evaType)}
                     </span>
                   )}
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); toggleFav(idx.c, 'index', e); }} className="p-1.5 text-amber-400">
-                  <Star fill="currentColor" size={18} />
-                </button>
+                {selectMode ? (
+                  <button onClick={(e) => { e.stopPropagation(); toggleSelectItem(idx.c); }} className="p-1.5">
+                    {selectedItems.has(idx.c)
+                      ? <CheckSquare size={20} className="text-brand-500" />
+                      : <Square size={20} className="text-slate-300" />
+                    }
+                  </button>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); handleSingleUnfav(idx.c, idx.n, 'index'); }} className="p-1.5 text-amber-400">
+                    <Star fill="currentColor" size={18} />
+                  </button>
+                )}
               </div>
               <div className="flex items-baseline gap-2 mb-3">
                 <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
@@ -2549,15 +2596,62 @@ export default function App() {
     );
   };
 
+  const handleBatchUnfav = () => {
+    if (selectedItems.size === 0) return;
+    setConfirmDialog({
+      title: '取消收藏',
+      message: `确定取消收藏选中的 ${selectedItems.size} 项吗？`,
+      onConfirm: () => {
+        if (favTab === 'stocks') {
+          setFavStocks(prev => prev.filter(c => !selectedItems.has(c)));
+        } else {
+          setFavIndices(prev => prev.filter(c => !selectedItems.has(c)));
+        }
+        setSelectedItems(new Set());
+        setSelectMode(false);
+        setConfirmDialog(null);
+      }
+    });
+  };
+
+  const toggleSelectItem = (code: string) => {
+    setSelectedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  };
+
+  const handleSingleUnfav = (code: string, name: string, type: 'stock' | 'index') => {
+    setConfirmDialog({
+      title: '取消收藏',
+      message: `确定取消收藏 "${name}" 吗？`,
+      onConfirm: () => {
+        toggleFav(code, type);
+        setConfirmDialog(null);
+      }
+    });
+  };
+
   const renderFav = () => {
+    const totalItems = favTab === 'stocks' ? favStocks.length : favIndices.length;
     return (
       <div className="space-y-4">
         <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card items-center">
-          <button onClick={() => setFavTab('stocks')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'stocks' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选股</button>
-          <button onClick={() => setFavTab('indices')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'indices' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选指数</button>
+          <button onClick={() => { setFavTab('stocks'); setSelectMode(false); setSelectedItems(new Set()); }} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'stocks' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选股</button>
+          <button onClick={() => { setFavTab('indices'); setSelectMode(false); setSelectedItems(new Set()); }} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'indices' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选指数</button>
           <button
-            onClick={() => setDragMode(!dragMode)}
-            className={`ml-2 p-2 rounded-xl transition-all duration-200 ${dragMode ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
+            onClick={() => { if (dragMode) { setDragMode(false); } else { setSelectMode(!selectMode); setSelectedItems(new Set()); } }}
+            className={`ml-1.5 p-2 rounded-xl transition-all duration-200 ${selectMode ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
+            title="多选"
+          >
+            <CheckSquare size={16} />
+          </button>
+          <button
+            onClick={() => { if (selectMode) { setSelectMode(false); setSelectedItems(new Set()); } else { setDragMode(!dragMode); } }}
+            className={`ml-1 p-2 rounded-xl transition-all duration-200 ${dragMode ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
+            title="排序"
           >
             <GripVertical size={16} />
           </button>
@@ -2567,7 +2661,40 @@ export default function App() {
             长按或拖拽卡片可调整顺序
           </div>
         )}
+        {selectMode && (
+          <div className="flex items-center justify-between px-1">
+            <button
+              onClick={() => {
+                if (selectedItems.size === totalItems) {
+                  setSelectedItems(new Set());
+                } else {
+                  const allCodes = favTab === 'stocks' ? new Set(favStocks) : new Set(favIndices);
+                  setSelectedItems(allCodes);
+                }
+              }}
+              className="text-xs text-brand-500 font-bold"
+            >
+              {selectedItems.size === totalItems ? '取消全选' : '全选'}
+            </button>
+            <span className="text-[11px] text-slate-400">已选 {selectedItems.size} 项</span>
+          </div>
+        )}
         {favTab === 'stocks' ? renderFavStocks() : renderFavIndices()}
+        {selectMode && selectedItems.size > 0 && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="fixed bottom-20 left-4 right-4 z-50"
+          >
+            <button
+              onClick={handleBatchUnfav}
+              className="w-full py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+            >
+              <Star size={16} />
+              取消收藏 ({selectedItems.size})
+            </button>
+          </motion.div>
+        )}
       </div>
     );
   };
@@ -2761,18 +2888,26 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100">
+                <div className="pt-4 border-t border-slate-100 space-y-3">
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">数据管理</label>
                   <button
-                    onClick={handleRestoreDefaults}
+                    onClick={() => setConfirmDialog({
+                      title: '恢复公司数据',
+                      message: '将清除所有自定义添加和删除的公司，恢复初始状态。',
+                      onConfirm: () => { handleRestoreDefaults(); setConfirmDialog(null); }
+                    })}
                     className="btn-danger w-full py-3 flex items-center justify-center gap-2"
                   >
                     <Trash2 size={15} />
                     恢复默认公司数据
                   </button>
-                  <p className="text-[10px] text-slate-400 mt-2 text-center">
-                    清除所有自定义添加和删除的公司，恢复初始状态
-                  </p>
+                  <button
+                    onClick={handleRestoreDefaultIndices}
+                    className="w-full py-3 flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 text-amber-600 font-bold rounded-2xl active:scale-[0.98] transition-transform"
+                  >
+                    <RotateCcw size={15} />
+                    恢复默认指数数据
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-2">
@@ -2789,6 +2924,46 @@ export default function App() {
                     完成
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 确认弹窗 */}
+        {confirmDialog && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmDialog(null)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl"
+            >
+              <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <AlertCircle size={24} className="text-amber-500" />
+              </div>
+              <h3 className="text-base font-extrabold text-slate-900 text-center mb-2">{confirmDialog.title}</h3>
+              <p className="text-sm text-slate-500 text-center leading-relaxed mb-6">{confirmDialog.message}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setConfirmDialog(null)}
+                  className="py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl active:scale-[0.98] transition-transform"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={confirmDialog.onConfirm}
+                  className="py-3 bg-red-500 text-white font-bold rounded-2xl active:scale-[0.98] transition-transform shadow-lg shadow-red-500/25"
+                >
+                  确定
+                </button>
               </div>
             </motion.div>
           </div>
