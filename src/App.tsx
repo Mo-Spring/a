@@ -489,6 +489,10 @@ export default function App() {
     return () => { listener.then(l => l.remove()); };
   }, []);
 
+  // Capacitor 环境下直接访问真实 API（无 CORS 限制），Web 环境走代理
+  const djApiBase = Capacitor.isNativePlatform() ? 'https://danjuanfunds.com' : '';
+  const sinaApiBase = Capacitor.isNativePlatform() ? 'https://vip.stock.finance.sina.com.cn' : '';
+
   const getMergedIndustries = (base: Industry[], mkt: 'A' | 'HK' | 'GLOBAL') => {
     const merged = JSON.parse(JSON.stringify(base)) as Industry[];
     
@@ -671,8 +675,8 @@ export default function App() {
       };
 
       try {
-        // /djapi is proxied by vite dev server or nginx in production
-        const resp = await fetch('/djapi/index_eva/dj');
+        // Capacitor: 直接访问 danjuanfunds.com；Web: 走 /djapi 代理
+        const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`);
         const data = await resp.json();
         if (data.data && data.data.items && data.data.items.length > 0) {
           applyData(data.data.items);
@@ -742,7 +746,7 @@ export default function App() {
 
         try {
           // 1. Fetch constituent stocks from Sina
-          const resp = await fetch(`/sina-api/corp/go.php/vII_NewestComponent/indexid/${idx.c}.phtml`);
+          const resp = await fetch(`${sinaApiBase}/corp/go.php/vII_NewestComponent/indexid/${idx.c}.phtml`);
           const buf = await resp.arrayBuffer();
           const html = new TextDecoder('gbk').decode(buf);
           const codeMatches = [...html.matchAll(/<div align="center">(\d{6})<\/div>/g)];
