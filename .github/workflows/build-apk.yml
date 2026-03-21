@@ -16,7 +16,9 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        # 核心修改：将 Node 版本改为 22 以满足 Capacitor CLI 要求
+        node-version: '22'
+        cache: 'npm'
 
     - name: Install dependencies
       run: npm install
@@ -28,7 +30,8 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
-        java-version: '17'
+        # 建议修改：配合 Node 22，使用 Java 21 兼容性更佳
+        java-version: '21'
 
     - name: Add Android Platform
       run: |
