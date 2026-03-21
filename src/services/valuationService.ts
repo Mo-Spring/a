@@ -4,6 +4,8 @@
  */
 
 import type { CompleteStockData } from './stockDataService';
+import type { ValuationConfig, DCFParams, PERelativeParams, GordonParams } from '../types';
+import { VALUATION_PRESETS } from '../types';
 
 // ─── 类型定义 ───
 
@@ -100,15 +102,15 @@ export interface ValuationSummary {
  * 
  * WACC = Rf + β × ERP（资本资产定价模型）
  */
-export function calculateDCF(data: CompleteStockData): DCFResult {
-  // 参数设置
-  const Rf = 0.025;          // 无风险利率（10年期国债收益率）
-  const ERP = 0.06;          // 股权风险溢价
-  const beta = estimateBeta(data); // 估算 Beta
+export function calculateDCF(data: CompleteStockData, params?: DCFParams): DCFResult {
+  const p = params || VALUATION_PRESETS.neutral.config.dcf;
+  const Rf = p.rf;
+  const ERP = p.erp;
+  const beta = estimateBeta(data);
 
   const wacc = Rf + beta * ERP;
-  const terminalGrowth = 0.03; // 永续增长率（中国名义GDP增速约3-4%）
-  const projectionYears = 10;
+  const terminalGrowth = p.terminalGrowth;
+  const projectionYears = p.projectionYears;
 
   // 基础 EPS
   const currentEPS = data.eps > 0 ? data.eps : 0;
@@ -256,36 +258,34 @@ function estimateShares(data: CompleteStockData): number {
  */
 export function calculatePERelative(
   data: CompleteStockData,
-  industryPE: number
+  industryPE: number,
+  params?: PERelativeParams
 ): PERelativeResult {
+  const p = params || VALUATION_PRESETS.neutral.config.pe;
   const currentROE = data.roe / 100;
   const currentGrowth = Math.max(data.netIncomeGrowth / 100, 0);
 
   // ① 行业 PE × ROE 修正
-  // ROE 越高，相对于行业平均可享受更高 PE
-  const roeAdjustment = currentROE > 0 ? Math.min(currentROE / 0.15, 2.0) : 0.5;
+  const roeAdjustment = currentROE > 0 ? Math.min(currentROE / p.roeBase, 2.0) : 0.5;
   const industryFairPE = industryPE * roeAdjustment;
 
-  // ② 历史 PE（如果有历史数据，取中位数；否则用行业PE）
+  // ② 历史 PE
   let historicalPE = industryPE;
   if (data.history && data.history.years.length >= 2) {
-    // 用历史数据的均值作为参考
     historicalPE = data.pe > 0 ? data.pe : industryPE;
   }
   const historicalFairPE = historicalPE;
 
   // ③ PEG 修正
-  // 合理 PEG = 1，所以合理 PE = 增长率 × 100
-  // 但增长率过低时用最低 PE
   const growthPE = currentGrowth > 0.02 ? currentGrowth * 100 : industryPE * 0.5;
   const growthAdjustment = currentGrowth;
 
   // 权重分配
   const hasHistory = data.history && data.history.years.length >= 3;
   const weights = {
-    industry: 0.4,
-    historical: hasHistory ? 0.35 : 0.2,
-    growth: hasHistory ? 0.25 : 0.4,
+    industry: p.industryWeight,
+    historical: hasHistory ? p.historicalWeight : p.historicalWeight * 0.5,
+    growth: hasHistory ? p.growthWeight : p.growthWeight + p.historicalWeight * 0.5,
   };
 
   // 加权平均
@@ -331,7 +331,8 @@ export function calculatePERelative(
  * 对于低分红公司，用 RIM（剩余收益模型）近似：
  * V = BV + Σ (ROE - r) × BV₍ₜ₋₁₎ / (1+r)ᵗ
  */
-export function calculateGordon(data: CompleteStockData): GordonResult {
+export function calculateGordon(data: CompleteStockData, params?: GordonParams): GordonResult {
+  const p = params || VALUATION_PRESETS.neutral.config.gordon;
   const currentBVPS = data.bvps > 0 ? data.bvps : 0;
   const currentROE = data.roe / 100;
   const currentDY = data.dy / 100;
@@ -356,9 +357,9 @@ export function calculateGordon(data: CompleteStockData): GordonResult {
   }
 
   // 分红增长率 = ROE × 留存率
-  const payoutRatio = currentEPS > 0 ? (currentDividend / currentEPS) : 0.3;
+  const payoutRatio = currentEPS > 0 ? (currentDividend / currentEPS) : p.defaultPayoutRatio;
   const retentionRatio = Math.max(1 - payoutRatio, 0);
-  const dividendGrowthRate = Math.min(currentROE * retentionRatio, 0.10); // 上限 10%
+  const dividendGrowthRate = Math.min(currentROE * retentionRatio, p.maxGrowthRate);
 
   let intrinsicValue = 0;
   let impliedPE = 0;
@@ -456,11 +457,13 @@ function estimatePayoutRatio(data: CompleteStockData): number {
  */
 export function calculateValuationSummary(
   data: CompleteStockData,
-  industryPE: number
+  industryPE: number,
+  config?: ValuationConfig
 ): ValuationSummary {
-  const dcf = calculateDCF(data);
-  const peRelative = calculatePERelative(data, industryPE);
-  const gordon = calculateGordon(data);
+  const cfg = config || VALUATION_PRESETS.neutral.config;
+  const dcf = calculateDCF(data, cfg.dcf);
+  const peRelative = calculatePERelative(data, industryPE, cfg.pe);
+  const gordon = calculateGordon(data, cfg.gordon);
 
   // 动态权重
   const isHighDividend = data.dy > 3;
