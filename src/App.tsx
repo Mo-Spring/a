@@ -301,9 +301,10 @@ interface IndexDetailViewProps {
   setView: (view: ViewType) => void;
   toggleFav: (code: string, type: 'stock' | 'index', e?: React.MouseEvent) => void;
   favIndices: string[];
+  breadcrumbNodes?: React.ReactNode;  // Custom breadcrumb content (e.g. from industry page)
 }
 
-const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndices }: IndexDetailViewProps) => {
+const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndices, breadcrumbNodes }: IndexDetailViewProps) => {
   const bd = batchData[idx.c];
   const djIv = indexVal[idx.c];
   // Merge: prefer indexVal (danjuan/percentile), fallback to batchData for PE/PB/DY
@@ -319,9 +320,13 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
   return (
     <div className="space-y-4">
       <div className="breadcrumb">
-        <button onClick={() => setView('index_list')} className="breadcrumb-link">指数列表</button>
-        <ChevronRight size={12} />
-        <span>{idx.n}</span>
+        {breadcrumbNodes || (
+          <>
+            <button onClick={() => setView('index_list')} className="breadcrumb-link">指数列表</button>
+            <ChevronRight size={12} />
+            <span>{idx.n}</span>
+          </>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -2067,67 +2072,31 @@ export default function App() {
     if (!ind) return null;
     const indexInfo = (ind.indices || []).find(idx => idx.c === indexCode);
     if (!indexInfo) return null;
-    const bd = batchData[indexCode];
+
+    const indexObj: Index = {
+      c: indexInfo.c,
+      n: indexInfo.n,
+      m: (ind.market === 'HK' ? 'HK' : 'A') as 'A' | 'HK' | 'GLOBAL',
+    };
 
     return (
-      <div className="space-y-4">
-        <div className="breadcrumb">
-          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
-          <ChevronRight size={12} />
-          <button onClick={() => navigate('ind', indIdx)} className="breadcrumb-link">{ind.nm}</button>
-          <ChevronRight size={12} />
-          <span>{indexInfo.n}</span>
-        </div>
-
-        <div className="card-elevated p-6 relative overflow-hidden">
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-xl font-bold text-slate-800">{indexInfo.n}</h2>
-                <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${indexInfo.t === 'broad' ? 'bg-indigo-50 text-indigo-600' : 'bg-amber-50 text-amber-600'}`}>
-                  {indexInfo.t === 'broad' ? '宽基指数' : '主题指数'}
-                </span>
-              </div>
-              <div className="text-xs text-slate-400 font-mono">{indexCode}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-slate-900">{bd?.p || '—'}</div>
-              {bd?.cp && (
-                <div className={`text-sm font-bold ${parseFloat(bd.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                  {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-slate-50 rounded-2xl p-4 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">市盈率 PE (TTM)</div>
-              <div className="text-xl font-bold text-slate-800">{bd?.pe && bd.pe > 0 ? bd.pe : '—'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-2xl p-4 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">市净率 PB</div>
-              <div className="text-xl font-bold text-slate-800">{bd?.pb && bd.pb > 0 ? bd.pb : '—'}</div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-2xl text-xs text-slate-600 leading-relaxed">
-            <div className="font-bold text-indigo-600 mb-1">指数说明</div>
-            {indexInfo.t === 'broad' ? (
-              <p>该指数是反映{ind.nm}行业整体表现的宽基指数，涵盖了行业内具有代表性的多数上市公司，是评估行业整体估值水平的重要参考。</p>
-            ) : (
-              <p>该指数是聚焦于{ind.nm}行业中特定细分领域（如{indexInfo.n.replace(/中证|指数|100|300/g, '')}）的主题指数，反映了该细分赛道的景气度和市场关注度。</p>
-            )}
-          </div>
-        </div>
-
-        <button 
-          onClick={goBack}
-          className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl text-sm font-bold active:scale-95 transition-transform flex items-center justify-center gap-2"
-        >
-          <ArrowLeft size={16} /> 返回行业详情
-        </button>
-      </div>
+      <IndexDetailView
+        idx={indexObj}
+        batchData={batchData}
+        indexVal={indexVal}
+        setView={setView}
+        toggleFav={toggleFav}
+        favIndices={favIndices}
+        breadcrumbNodes={
+          <>
+            <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
+            <ChevronRight size={12} />
+            <button onClick={() => navigate('ind', indIdx)} className="breadcrumb-link">{ind.nm}</button>
+            <ChevronRight size={12} />
+            <span>{indexInfo.n}</span>
+          </>
+        }
+      />
     );
   };
 
