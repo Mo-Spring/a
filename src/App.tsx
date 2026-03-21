@@ -21,7 +21,9 @@ import {
   MessageSquare,
   Plus,
   X,
-  MoreVertical
+  MoreVertical,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Industry, Company, AIConfig, ViewType, NavigationState, Index } from './types';
@@ -460,6 +462,17 @@ export default function App() {
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; mcap?: number; p?: string; cp?: string }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>>({});
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('iv_dark');
+    if (saved !== null) return saved === 'true';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  // 初始化 & 切换暗色模式
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('iv_dark', String(darkMode));
+  }, [darkMode]);
 
   // 导航状态 ref（供返回键监听使用，避免闭包陈旧）
   const navStackRef = useRef<NavigationState[]>([]);
@@ -473,18 +486,17 @@ export default function App() {
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
 
-  // 状态栏：不覆盖 WebView，深色文字适配浅色主题
+  // 状态栏：不覆盖 WebView，根据主题适配
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      // 延迟执行确保 WebView 渲染完成，避免状态栏样式被覆盖
       const timer = setTimeout(() => {
         StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-        StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
-        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: darkMode ? '#0f172a' : '#ffffff' }).catch(() => {});
+        StatusBar.setStyle({ style: darkMode ? Style.Light : Style.Dark }).catch(() => {});
       }, 200);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [darkMode]);
 
   // Android 返回键监听 —— 完全基于 ref，无闭包陈旧问题
   useEffect(() => {
@@ -822,6 +834,65 @@ export default function App() {
     // Run after a delay to let DJ/eastmoney results arrive first
     const timer = setTimeout(fetchAndCompute, 5000);
     return () => clearTimeout(timer);
+  }, [allIndexCodes]);
+
+  // 专用指数 PE/PB/DY 获取：逐个 JSONP 请求 eastmoney 单品种接口
+  // 批量 API (ulist.np) 对指数可能不返回估值字段，此效果确保指数估值数据可靠获取
+  useEffect(() => {
+    if (indices.length === 0) return;
+
+    const fetchAllIndexVal = () => {
+      indices.forEach((idx, i) => {
+        if (!idx.mk || idx.m === 'GLOBAL') return;
+
+        const cbName = `jsonp_ixval_${Date.now()}_${i}_${Math.floor(Math.random() * 10000)}`;
+        const timeoutId = setTimeout(() => {
+          delete (window as any)[cbName];
+          const el = document.getElementById(cbName);
+          if (el) el.remove();
+        }, 8000);
+
+        (window as any)[cbName] = (d: any) => {
+          clearTimeout(timeoutId);
+          if (d?.data) {
+            const pe = d.data.f162 !== undefined && d.data.f162 !== '-' && d.data.f162 > 0 ? d.data.f162 / 100 :
+                       d.data.f9 !== undefined && d.data.f9 !== '-' && d.data.f9 > 0 ? d.data.f9 / 100 : undefined;
+            const pb = d.data.f167 !== undefined && d.data.f167 !== '-' && d.data.f167 > 0 ? d.data.f167 / 100 :
+                       d.data.f23 !== undefined && d.data.f23 !== '-' && d.data.f23 > 0 ? d.data.f23 / 100 : undefined;
+            const dy = d.data.f173 !== undefined && d.data.f173 !== '-' && d.data.f173 > 0 ? d.data.f173 / 100 : undefined;
+            if (pe || pb) {
+              setIndexVal(prev => {
+                const existing = prev[idx.c];
+                // 仅在无数据或数据更优时更新
+                if (!existing?.pe && !existing?.pb) {
+                  return { ...prev, [idx.c]: { pe, pb, dy } };
+                }
+                return prev;
+              });
+            }
+          }
+          delete (window as any)[cbName];
+          const el = document.getElementById(cbName);
+          if (el) el.remove();
+        };
+
+        const script = document.createElement('script');
+        script.id = cbName;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${idx.mk}.${idx.c}&fields=f9,f23,f162,f167,f173&cb=${cbName}`;
+        script.onerror = () => {
+          clearTimeout(timeoutId);
+          delete (window as any)[cbName];
+          const el = document.getElementById(cbName);
+          if (el) el.remove();
+        };
+        document.head.appendChild(script);
+      });
+    };
+
+    // 首次立即执行 + 每 60 秒刷新
+    fetchAllIndexVal();
+    const timer = setInterval(fetchAllIndexVal, 60000);
+    return () => clearInterval(timer);
   }, [allIndexCodes]);
 
   useEffect(() => {
@@ -2140,7 +2211,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-surface pb-24">
+    <div className={`min-h-screen bg-surface pb-24 ${darkMode ? 'text-slate-100' : ''}`}>
       {/* Top Bar */}
       <div className="sticky top-0 z-50 nav-glass px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -2161,9 +2232,14 @@ export default function App() {
              view === 'index_detail' ? '指数详情' : '自选股'}
           </h1>
         </div>
-        <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all">
-          <Settings size={19} strokeWidth={2} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
+            {darkMode ? <Sun size={19} strokeWidth={2} /> : <Moon size={19} strokeWidth={2} />}
+          </button>
+          <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
+            <Settings size={19} strokeWidth={2} />
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
