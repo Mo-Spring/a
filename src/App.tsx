@@ -571,7 +571,6 @@ export default function App() {
   const [livePrice, setLivePrice] = useState<{ 
     p: string; ch: string; cp: string; up: boolean;
     pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string; fcap?: string;
-    roe?: string; turn?: string; gross?: string; debt?: string; rev?: string;
   } | null>(null);
   const [customCompanies, setCustomCompanies] = useState<any[]>(() => JSON.parse(localStorage.getItem('iv_custom_comps') || '[]'));
   const [deletedCompanies, setDeletedCompanies] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_deleted_comps') || '[]'));
@@ -579,7 +578,7 @@ export default function App() {
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [isAddingIndex, setIsAddingIndex] = useState(false);
   const [aiIndexError, setAiIndexError] = useState<string | null>(null);
-  const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; p?: string; cp?: string }>>({});
+  const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; fcap?: number; roe?: number; p?: string; cp?: string }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('iv_dark');
@@ -776,11 +775,13 @@ export default function App() {
                 const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
                 const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
                 const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
+                const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
+                const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 / 100 : undefined;
                 
                 const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
                 const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
                 
-                newData[code] = { pe, pb, dy, ps, mcap, p, cp };
+                newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
               });
               return newData;
             });
@@ -792,7 +793,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173,f188&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f117,f162,f167,f173,f188,f37&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.warn(`[Batch] JSONP error, trying fetch fallback for chunk ${i/chunkSize}`);
@@ -800,7 +801,7 @@ export default function App() {
           const scriptEl = document.getElementById(cbName);
           if (scriptEl) scriptEl.remove();
           // Fallback: try fetch() (works on Capacitor native, may fail on web due to CORS)
-          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f162,f167,f173,f188`)
+          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f117,f162,f167,f173,f188,f37`)
             .then(r => r.json())
             .then((d: any) => {
               if (d?.data?.diff) {
@@ -819,9 +820,11 @@ export default function App() {
                     const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
                     const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
                     const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
+                    const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
+                    const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 / 100 : undefined;
                     const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
                     const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
-                    newData[code] = { pe, pb, dy, ps, mcap, p, cp };
+                    newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
                   });
                   return newData;
                 });
@@ -1171,13 +1174,8 @@ export default function App() {
             const ps = d.data.f188 !== '-' && d.data.f188 !== undefined && d.data.f188 > 0 ? (d.data.f188 / 100).toFixed(2) : undefined;
             const mcap = d.data.f116 !== '-' && d.data.f116 !== undefined ? (d.data.f116 / 100000000).toFixed(2) : undefined;
             const fcap = d.data.f117 !== '-' && d.data.f117 !== undefined ? (d.data.f117 / 100000000).toFixed(2) : undefined;
-            const roe = d.data.f37 !== '-' && d.data.f37 !== undefined && d.data.f37 > 0 ? (d.data.f37 / 100).toFixed(2) : undefined;
-            const turn = d.data.f8 !== '-' && d.data.f8 !== undefined ? (d.data.f8 / 100).toFixed(2) : undefined;
-            const gross = d.data.f49 !== '-' && d.data.f49 !== undefined ? (d.data.f49 / 100).toFixed(2) : undefined;
-            const debt = d.data.f57 !== '-' && d.data.f57 !== undefined ? (d.data.f57 / 100).toFixed(2) : undefined;
-            const rev = d.data.f40 !== '-' && d.data.f40 !== undefined && d.data.f40 > 0 ? (d.data.f40 / 100000000).toFixed(2) : undefined;
 
-            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap, fcap, roe, turn, gross, debt, rev });
+            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap, fcap });
           }
           delete (window as any)[cbName];
           const scriptEl = document.getElementById(cbName);
@@ -1186,7 +1184,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f117,f9,f23,f60,f169,f37,f8,f49,f57,f40&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f117,f9,f23,f60,f169&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.error('Failed to fetch price');
@@ -1642,7 +1640,7 @@ export default function App() {
     const currentPE = livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || c.pe || 0);
     const currentPB = livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || c.pb || 0);
     const currentDY = livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || c.dy || 0);
-    const currentROE = livePrice?.roe && !isNaN(parseFloat(livePrice.roe)) && parseFloat(livePrice.roe) > 0 ? parseFloat(livePrice.roe) : (c.roe || 0);
+    const currentROE = livePrice?.roe && !isNaN(parseFloat(livePrice.roe)) && parseFloat(livePrice.roe) > 0 ? parseFloat(livePrice.roe) : (batchData[tCode]?.roe || c.roe || 0);
 
     const rf = 0.05, erp = 0.06, beta = 1, wacc = rf + beta * erp;
     const growth = currentROE > 20 ? 0.08 : currentROE > 15 ? 0.06 : currentROE > 10 ? 0.04 : 0.02;
@@ -1747,10 +1745,8 @@ export default function App() {
               { l: 'ROE', v: `${currentROE}%` },
               { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || c.dy}%` },
               { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || c.ps || '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
-              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : '—' },
-              { l: '换手率', v: livePrice?.turn ? `${livePrice.turn}%` : '—' },
-              { l: '毛利率', v: livePrice?.gross ? `${livePrice.gross}%` : '—' },
+              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—' },
+              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : batchData[tCode]?.fcap ? `${batchData[tCode].fcap.toFixed(0)}亿` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
                 <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
@@ -1758,34 +1754,6 @@ export default function App() {
               </div>
             ))}
           </div>
-
-          {/* 经营质量 */}
-          {(livePrice?.debt || livePrice?.rev) && (
-            <div className="grid grid-cols-2 gap-2">
-              {livePrice?.rev && (
-                <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                  <div className="w-8 h-8 rounded-lg bg-sky-50 flex items-center justify-center text-sky-500 flex-shrink-0">
-                    <TrendingUp size={16} />
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-slate-400 font-bold">营业收入</div>
-                    <div className="text-sm font-bold text-slate-700 tabular-nums">{livePrice.rev}亿</div>
-                  </div>
-                </div>
-              )}
-              {livePrice?.debt && (
-                <div className="bg-white border border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${parseFloat(livePrice.debt) > 60 ? 'bg-red-50 text-red-500' : parseFloat(livePrice.debt) > 40 ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
-                    <AlertCircle size={16} />
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-slate-400 font-bold">资产负债率</div>
-                    <div className={`text-sm font-bold tabular-nums ${parseFloat(livePrice.debt) > 60 ? 'text-red-500' : parseFloat(livePrice.debt) > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{livePrice.debt}%</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="grid grid-cols-4 gap-2">
             {[
