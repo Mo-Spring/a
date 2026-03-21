@@ -437,42 +437,51 @@ export default function App() {
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>>({});
 
   // 导航状态 ref（供返回键监听使用，避免闭包陈旧）
-  const navStackRef = useRef(navStack);
-  const viewRef = useRef(view);
+  const navStackRef = useRef<NavigationState[]>([]);
+  const navArgsRef = useRef<any[]>([]);
+  const viewRef = useRef<ViewType>(view);
   const showSettingsRef = useRef(showSettings);
+
+  // 同步 state → ref
   useEffect(() => { navStackRef.current = navStack; }, [navStack]);
+  useEffect(() => { navArgsRef.current = navArgs; }, [navArgs]);
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
 
-  // 状态栏：全面屏适配
+  // 状态栏：不覆盖 WebView，让内容自然排列在状态栏下方
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
       StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
       StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
     }
   }, []);
 
-  // Android 返回键监听
+  // Android 返回键监听 —— 完全基于 ref，无闭包陈旧问题
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const listener = CapApp.addListener('backButton', () => {
-      // 设置面板打开时先关闭设置
+      // 1. 设置面板打开时 → 关闭设置
       if (showSettingsRef.current) {
         setShowSettings(false);
         return;
       }
-      // 有导航栈时返回上一页
-      if (navStackRef.current.length > 0) {
-        goBack();
+      // 2. 有导航栈 → 返回上一页
+      const stack = navStackRef.current;
+      if (stack.length > 0) {
+        const prev = stack[stack.length - 1];
+        setNavStack(s => s.slice(0, -1));
+        setView(prev.view);
+        setNavArgs(prev.args);
+        window.scrollTo(0, 0);
         return;
       }
-      // 在首页时最小化应用（不退出）
+      // 3. 在首页 → 最小化
       if (viewRef.current === 'home') {
         CapApp.minimizeApp();
         return;
       }
-      // 其他页面回到首页
+      // 4. 其他页面 → 回到首页
       setView('home');
       setNavStack([]);
       setNavArgs([]);
@@ -1939,7 +1948,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-surface pb-24">
       {/* Top Bar */}
-      <div className="sticky top-0 z-50 nav-glass px-4 pb-3 flex items-center justify-between" style={{ paddingTop: `calc(12px + env(safe-area-inset-top, 0px))` }}>
+      <div className="sticky top-0 z-50 nav-glass px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           {navStack.length > 0 && view !== 'home' && (
             <button onClick={goBack} className="p-1.5 -ml-1 rounded-xl text-slate-500 hover:bg-slate-100/60 active:scale-90 transition-all">
