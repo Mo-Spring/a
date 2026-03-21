@@ -595,7 +595,16 @@ export default function App() {
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [isAddingIndex, setIsAddingIndex] = useState(false);
   const [aiIndexError, setAiIndexError] = useState<string | null>(null);
-  const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; ps?: number; mcap?: number; fcap?: number; roe?: number; p?: string; cp?: string }>>({});
+  const [batchData, setBatchData] = useState<Record<string, {
+    pe?: number; pb?: number; dy?: number; ps?: number; roe?: number; eps?: number;
+    mcap?: number; fcap?: number;
+    p?: string; cp?: string;
+    roa?: number; grossMargin?: number; netMargin?: number; debt?: number;
+    revenueGrowth?: number; netIncomeGrowth?: number;
+    dividendPerShare?: number; payoutYears?: number;
+    pePct?: number; pbPct?: number;
+    revenue?: number; netIncome?: number;
+  }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>>({});
   // 实时股票详情数据（用于增强估值模型）
   const [stockDetailData, setStockDetailData] = useState<Record<string, CompleteStockData>>({});
@@ -776,27 +785,45 @@ export default function App() {
               const newData = { ...prev };
               d.data.diff.forEach((item: any) => {
                 let code = item.f12;
-                // Map back special codes for global indices
                 if (code === 'UDI') code = 'DJI';
                 if (code === 'SPX') code = 'INX';
                 if (code === 'KOSPI') code = 'KS11';
                 if (code === 'NIFTY') code = 'NSEI';
 
-                const mkId = item.f13; // Market ID: 1=SH, 0=SZ, 116=HK, 90=BK
+                const mkId = item.f13;
                 const pScale = mkId === 116 ? 1000 : 100;
-                
-                const pe = item.f162 !== '-' && item.f162 !== undefined && item.f162 > 0 ? item.f162 / 100 : (item.f9 !== '-' && item.f9 !== undefined && item.f9 > 0 ? item.f9 / 100 : undefined);
-                const pb = item.f167 !== '-' && item.f167 !== undefined && item.f167 > 0 ? item.f167 / 100 : (item.f23 !== '-' && item.f23 !== undefined && item.f23 > 0 ? item.f23 / 100 : undefined);
-                const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
-                const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
-                const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
-                const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
-                const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 : undefined;
-                
-                const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
-                const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
-                
-                newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
+                const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
+                const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
+
+                newData[code] = {
+                  // 基础行情
+                  p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
+                  cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
+                  // 估值指标
+                  pe: valPos(item.f162, 100) || valPos(item.f9, 100),
+                  pb: valPos(item.f167, 100) || valPos(item.f23, 100),
+                  dy: valPos(item.f177, 100),
+                  ps: valPos(item.f188, 100),
+                  roe: val(item.f183, 100) || val(item.f37),
+                  roa: val(item.f184, 100),
+                  eps: valPos(item.f168, 100),
+                  // 市值（f20=总市值）
+                  mcap: valPos(item.f20, 100000000) || valPos(item.f57, 100000000),
+                  fcap: valPos(item.f117, 100000000),
+                  // 盈利质量
+                  grossMargin: val(item.f185, 100),
+                  netMargin: val(item.f186, 100),
+                  debt: val(item.f52, 100),
+                  // 增长率
+                  revenueGrowth: val(item.f98, 100),
+                  netIncomeGrowth: val(item.f99, 100),
+                  // 分红
+                  dividendPerShare: val(item.f69),
+                  payoutYears: val(item.f100),
+                  // 百分位
+                  pePct: val(item.f137, 100),
+                  pbPct: val(item.f138, 100),
+                };
               });
               return newData;
             });
@@ -808,7 +835,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f117,f162,f167,f173,f188,f37&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.warn(`[Batch] JSONP error, trying fetch fallback for chunk ${i/chunkSize}`);
@@ -816,7 +843,7 @@ export default function App() {
           const scriptEl = document.getElementById(cbName);
           if (scriptEl) scriptEl.remove();
           // Fallback: try fetch() (works on Capacitor native, may fail on web due to CORS)
-          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f12,f13,f14,f2,f3,f9,f23,f116,f117,f162,f167,f173,f188,f37`)
+          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138`)
             .then(r => r.json())
             .then((d: any) => {
               if (d?.data?.diff) {
@@ -889,6 +916,19 @@ export default function App() {
         }
 
         const data = await fetchStockDataCached(code, market, staticFallback);
+        // 用 batchData 中的实时数据补全
+        const bd = batchData[code];
+        if (bd) {
+          if (bd.revenueGrowth !== undefined && data.revenueGrowth === 0) data.revenueGrowth = bd.revenueGrowth;
+          if (bd.netIncomeGrowth !== undefined && data.netIncomeGrowth === 0) data.netIncomeGrowth = bd.netIncomeGrowth;
+          if (bd.dividendPerShare !== undefined) data.dividendPerShare = bd.dividendPerShare;
+          if (bd.eps !== undefined && data.eps === 0) data.eps = bd.eps;
+          if (bd.roa !== undefined && data.roa === 0) data.roa = bd.roa;
+          if (bd.grossMargin !== undefined && data.grossMargin === 0) data.grossMargin = bd.grossMargin;
+          if (bd.netMargin !== undefined && data.netMargin === 0) data.netMargin = bd.netMargin;
+          if (bd.debt !== undefined && data.totalDebt === 0) data.totalDebt = bd.debt;
+          if (bd.mcap !== undefined && data.mcap === 0) data.mcap = bd.mcap;
+        }
         setStockDetailData(prev => ({ ...prev, [code]: data }));
 
         // 计算增强估值
@@ -1725,10 +1765,14 @@ export default function App() {
     const currentDY = realtimeData?.dy ? realtimeData.dy
       : (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
     const currentROE = realtimeData?.roe || batchData[tCode]?.roe || 0;
-    const currentEPS = realtimeData?.eps || 0;
+    const currentEPS = realtimeData?.eps || batchData[tCode]?.eps || 0;
     const currentBVPS = realtimeData?.bvps || 0;
     const currentPrice = realtimeData?.price && realtimeData.price > 0 ? realtimeData.price
       : ((livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0'));
+    // 新增：从 batchData 获取增长率和分红数据，供给 valuationService 使用
+    const bdRevenueGrowth = batchData[tCode]?.revenueGrowth;
+    const bdNetIncomeGrowth = batchData[tCode]?.netIncomeGrowth;
+    const bdDividendPerShare = batchData[tCode]?.dividendPerShare;
 
     // ─── 增强估值（优先使用 valuationService 计算结果）───
     let dcfPE = 0, peFairPE = 0, gordonPE = 0, pbFair = 0, fairPE = 0, margin = 0;
@@ -1850,13 +1894,15 @@ export default function App() {
 
           <div className="grid grid-cols-3 gap-2">
             {[
-              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe || '—' },
-              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb || '—' },
-              { l: 'ROE', v: currentROE > 0 ? `${currentROE}%` : '—' },
-              { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || '—'}%` },
-              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
-              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : '—' },
+              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe?.toFixed(1) || '—' },
+              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb?.toFixed(2) || '—' },
+              { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
+              { l: '股息率', v: batchData[tCode]?.dy ? `${batchData[tCode].dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—') },
+              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps?.toFixed(1) || '—' },
+              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—') },
+              { l: 'EPS', v: batchData[tCode]?.eps ? `${batchData[tCode].eps.toFixed(2)}` : '—' },
+              { l: 'ROA', v: batchData[tCode]?.roa ? `${batchData[tCode].roa.toFixed(1)}%` : '—' },
+              { l: '负债率', v: batchData[tCode]?.debt ? `${batchData[tCode].debt.toFixed(1)}%` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
                 <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
