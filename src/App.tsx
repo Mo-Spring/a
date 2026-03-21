@@ -779,7 +779,7 @@ export default function App() {
                 const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
                 const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
                 const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
-                const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 / 100 : undefined;
+                const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 : undefined;
                 
                 const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
                 const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
@@ -824,7 +824,7 @@ export default function App() {
                     const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
                     const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
                     const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
-                    const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 / 100 : undefined;
+                    const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 : undefined;
                     const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
                     const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
                     newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
@@ -1661,7 +1661,7 @@ export default function App() {
     const currentPE = livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || c.pe || 0);
     const currentPB = livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || c.pb || 0);
     const currentDY = livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || c.dy || 0);
-    const currentROE = livePrice?.roe && !isNaN(parseFloat(livePrice.roe)) && parseFloat(livePrice.roe) > 0 ? parseFloat(livePrice.roe) : (batchData[tCode]?.roe || c.roe || 0);
+    const currentROE = batchData[tCode]?.roe || c.roe || 0;
 
     const rf = 0.05, erp = 0.06, beta = 1, wacc = rf + beta * erp;
     const growth = currentROE > 20 ? 0.08 : currentROE > 15 ? 0.06 : currentROE > 10 ? 0.04 : 0.02;
@@ -1766,8 +1766,8 @@ export default function App() {
               { l: 'ROE', v: `${currentROE}%` },
               { l: '股息率', v: `${livePrice?.dy || batchData[tCode]?.dy || c.dy}%` },
               { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps || c.ps || '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—' },
-              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : batchData[tCode]?.fcap ? `${batchData[tCode].fcap.toFixed(0)}亿` : '—' },
+              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : '—' },
+              { l: '流通市值', v: livePrice?.fcap ? `${livePrice.fcap}亿` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
                 <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
