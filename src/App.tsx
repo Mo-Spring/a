@@ -32,7 +32,6 @@ import { DEFAULT_INDICES } from './indices';
 import { getAIResponse } from './services/aiService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Capacitor } from '@capacitor/core';
-import { Http } from '@capacitor-community/http';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
@@ -760,7 +759,7 @@ export default function App() {
       try {
         let djData: any;
         if (Capacitor.isNativePlatform()) {
-          const response = await Http.get({ url: `${djApiBase}/djapi/index_eva/dj`, headers: {} });
+          const response = await (window as any).CapacitorHttp.get({ url: `${djApiBase}/djapi/index_eva/dj` });
           djData = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         } else {
           const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`);
