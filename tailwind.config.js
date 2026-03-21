@@ -22,8 +22,8 @@ export default {
           900: '#312e81',
         },
         surface: {
-          DEFAULT: '#fafbfe',
-          raised: '#ffffff',
+          DEFAULT: 'var(--color-surface)',
+          raised: 'var(--color-surface-raised)',
           sunken: '#f1f5f9',
           muted: '#f8fafc',
         },
