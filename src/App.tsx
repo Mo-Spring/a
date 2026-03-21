@@ -448,12 +448,16 @@ export default function App() {
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
 
-  // 状态栏：不覆盖 WebView，让内容自然排列在状态栏下方
+  // 状态栏：不覆盖 WebView，深色文字适配浅色主题
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
+      // 延迟执行确保 WebView 渲染完成，避免状态栏样式被覆盖
+      const timer = setTimeout(() => {
+        StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
+        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      }, 200);
+      return () => clearTimeout(timer);
     }
   }, []);
 
