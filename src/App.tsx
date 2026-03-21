@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   TrendingUp, 
   Search, 
@@ -24,6 +24,9 @@ import { INDUSTRIES, HK_INDUSTRIES, DEFAULT_CONFIG, PROVIDERS } from './constant
 import { DEFAULT_INDICES } from './indices';
 import { getAIResponse } from './services/aiService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 interface SearchViewProps {
   allIndustries: Industry[];
@@ -432,6 +435,50 @@ export default function App() {
   const [aiAddError, setAiAddError] = useState<string | null>(null);
   const [batchData, setBatchData] = useState<Record<string, { pe?: number; pb?: number; dy?: number; mcap?: number; p?: string; cp?: string }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; source?: string }>>({});
+
+  // 导航状态 ref（供返回键监听使用，避免闭包陈旧）
+  const navStackRef = useRef(navStack);
+  const viewRef = useRef(view);
+  const showSettingsRef = useRef(showSettings);
+  useEffect(() => { navStackRef.current = navStack; }, [navStack]);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
+
+  // 状态栏：全面屏适配
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      StatusBar.setBackgroundColor({ color: '#ffffff' }).catch(() => {});
+    }
+  }, []);
+
+  // Android 返回键监听
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const listener = CapApp.addListener('backButton', () => {
+      // 设置面板打开时先关闭设置
+      if (showSettingsRef.current) {
+        setShowSettings(false);
+        return;
+      }
+      // 有导航栈时返回上一页
+      if (navStackRef.current.length > 0) {
+        goBack();
+        return;
+      }
+      // 在首页时最小化应用（不退出）
+      if (viewRef.current === 'home') {
+        CapApp.minimizeApp();
+        return;
+      }
+      // 其他页面回到首页
+      setView('home');
+      setNavStack([]);
+      setNavArgs([]);
+    });
+    return () => { listener.then(l => l.remove()); };
+  }, []);
 
   const getMergedIndustries = (base: Industry[], mkt: 'A' | 'HK' | 'GLOBAL') => {
     const merged = JSON.parse(JSON.stringify(base)) as Industry[];
@@ -1873,7 +1920,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       {/* Top Bar */}
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
+      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 pb-3 flex items-center justify-between shadow-sm" style={{ paddingTop: `calc(12px + env(safe-area-inset-top, 0px))` }}>
         <div className="flex items-center gap-2">
           {navStack.length > 0 && view !== 'home' && (
             <button onClick={goBack} className="p-1 text-slate-600 active:scale-90 transition-transform">
