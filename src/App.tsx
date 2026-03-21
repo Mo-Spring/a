@@ -758,18 +758,27 @@ export default function App() {
 
       try {
         // Capacitor: 直接访问 danjuanfunds.com；Web: 走 /djapi 代理
-        const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-            'Referer': 'https://danjuanfunds.com/',
-          },
+        // Use XMLHttpRequest for reliable header delivery in Capacitor WebView
+        const djData = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', `${djApiBase}/djapi/index_eva/dj`, true);
+          xhr.setRequestHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+          xhr.setRequestHeader('Accept', 'application/json');
+          xhr.timeout = 10000;
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new Error('JSON parse error')); }
+            } else { reject(new Error(`HTTP ${xhr.status}`)); }
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.ontimeout = () => reject(new Error('Timeout'));
+          xhr.send();
         });
-        const data = await resp.json();
-        if (data.data && data.data.items && data.data.items.length > 0) {
-          applyData(data.data.items);
+        if (djData?.data?.items?.length > 0) {
+          applyData(djData.data.items);
         }
       } catch (e) {
-        // CORS blocked in production - percentile data unavailable
+        console.warn('[IndexVal] Danjuan API failed:', e);
       }
 
       // Supplementary: fetch PE/PB for indices not matched by danjuan via eastmoney stock API
