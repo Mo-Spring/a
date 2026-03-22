@@ -1443,6 +1443,7 @@ export default function App() {
     if (ind.bk && batchData[ind.bk]) {
       const bkd = batchData[ind.bk];
       return {
+        p: bkd.p,
         pe: bkd.pe,
         pb: bkd.pb,
         dy: bkd.dy,
@@ -1542,15 +1543,16 @@ export default function App() {
 
       {/* Industry Cards */}
       <div className="space-y-3">
-        {currentIndustries.filter(i => filter === 'all' || getIndustryValuation(i).ev === filter).map((ind, idx) => {
+        {currentIndustries.filter(i => filter === 'all' || getIndustryValuation(i).ev === filter).map((ind) => {
           const indVal = getIndustryValuation(ind);
+          const realIdx = currentIndustries.indexOf(ind);
           return (
           <motion.div
             layout
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             key={ind.id}
-            onClick={() => navigate('ind', idx)}
+            onClick={() => navigate('ind', realIdx)}
             className="card-interactive p-4 relative overflow-hidden"
           >
             {indVal.source === 'index' && (
@@ -1561,6 +1563,9 @@ export default function App() {
             <div className="flex justify-between items-center mb-3">
               <div className="flex items-center gap-2">
                 <span className="text-[15px] font-extrabold text-slate-900">{ind.ic} {ind.nm}</span>
+                {indVal.p && (
+                  <span className="text-[11px] font-semibold text-slate-500 tabular-nums">{indVal.p}</span>
+                )}
                 {indVal.cp !== undefined && (
                   <span className={`text-[10px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
                     {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
@@ -1623,6 +1628,9 @@ export default function App() {
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-2.5">
               <h2 className="text-lg font-extrabold text-slate-900">{ind.ic} {ind.nm}</h2>
+              {indVal.p && (
+                <span className="text-sm font-semibold text-slate-500 tabular-nums">{indVal.p}</span>
+              )}
               {indVal.cp !== undefined && (
                 <span className={`text-[11px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
                   {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
