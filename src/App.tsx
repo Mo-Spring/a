@@ -1376,6 +1376,18 @@ export default function App() {
     });
   };
 
+  /**
+   * 根据 PE 动态计算行业估值水平
+   * PE < 15 → low(低估), PE > 30 → high(高估), 其他 → mid(适中)
+   */
+  const computeEv = (pe: number | undefined | string): 'low' | 'mid' | 'high' => {
+    const val = Number(pe);
+    if (!val || val <= 0) return 'mid';
+    if (val < 15) return 'low';
+    if (val > 30) return 'high';
+    return 'mid';
+  };
+
   const getIndustryValuation = (ind: Industry) => {
     // Priority: Use BK index data if available
     if (ind.bk && batchData[ind.bk]) {
@@ -1387,6 +1399,7 @@ export default function App() {
         cp: bkd.cp,
         ps: bkd.ps,
         mcap: bkd.mcap,
+        ev: computeEv(bkd.pe),
         source: 'index'
       };
     }
@@ -1415,7 +1428,7 @@ export default function App() {
     const avgDY = dyCount > 0 ? (totalDY / dyCount).toFixed(2) : undefined;
     const avgCP = cpCount > 0 ? (totalCP / cpCount).toFixed(2) : undefined;
 
-    return { pe: avgPE, pb: avgPB, dy: avgDY, cp: avgCP, source: 'calc' };
+    return { pe: avgPE, pb: avgPB, dy: avgDY, cp: avgCP, ev: computeEv(avgPE), source: 'calc' };
   };
 
   const renderHome = () => (
@@ -1455,7 +1468,7 @@ export default function App() {
         <div className="stat-cell">
           <div className="stat-label">低估行业</div>
           <div className="text-xl font-extrabold text-emerald-600 tabular-nums">
-            {currentIndustries.filter(i => i.ev === 'low').length}
+            {currentIndustries.filter(i => getIndustryValuation(i).ev === 'low').length}
           </div>
         </div>
       </div>
@@ -1479,7 +1492,7 @@ export default function App() {
 
       {/* Industry Cards */}
       <div className="space-y-3">
-        {currentIndustries.filter(i => filter === 'all' || i.ev === filter).map((ind, idx) => {
+        {currentIndustries.filter(i => filter === 'all' || getIndustryValuation(i).ev === filter).map((ind, idx) => {
           const indVal = getIndustryValuation(ind);
           return (
           <motion.div
@@ -1504,8 +1517,8 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
-                {evText(ind.ev)}
+              <span className={`badge ${indVal.ev === 'low' ? 'val-low' : indVal.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
+                {evText(indVal.ev)}
               </span>
             </div>
             {Number(indVal.pe) > 0 && (
@@ -1566,8 +1579,8 @@ export default function App() {
                 </span>
               )}
             </div>
-            <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
-              {evText(ind.ev)}
+            <span className={`badge ${indVal.ev === 'low' ? 'val-low' : indVal.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
+              {evText(indVal.ev)}
             </span>
           </div>
 
