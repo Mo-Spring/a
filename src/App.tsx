@@ -736,21 +736,11 @@ export default function App() {
     const fetchBatch = () => {
       const allCodes = allIndustries.flatMap(ind => ind.l2.flatMap(sub => sub.cs));
       const bkCodes = allIndustries.filter(ind => ind.bk).map(ind => ({ c: ind.bk, market: 'BK' }));
-      // ⚠️ 不再将指数加入批量 API：指数代码与股票代码大量重叠（如 000932 既是主要消费指数又是华菱钢铁），
-      // 批量 API 无法区分，会导致数据互相覆盖。指数数据由蛋卷 API（估值）和专用 JSONP（PE/PB）独立获取。
       const combined = [...allCodes, ...bkCodes];
       if (combined.length === 0) return;
-      
+
       const secidsList = combined.map(c => {
         if (c.market === 'BK') return `90.${c.c}`;
-        if (c.market === 'IDX') {
-          // Use stored mk if available for precise market identification
-          // Fallback: 000xxx/001xxx/930xxx/931xxx → SH (1), 399xxx → SZ (0)
-          const idx = indices.find(i => i.c === c.c);
-          if (idx?.mk) return `${idx.mk}.${c.c}`;
-          const realMk = (c.c.startsWith('399') || c.c.startsWith('159')) ? '0' : '1';
-          return `${realMk}.${c.c}`;
-        }
         if (c.market === 'HK') {
           if (['HSI', 'HSCEI', 'HSTECH'].includes(c.c)) return `100.${c.c}`;
           return `116.${c.c}`;
@@ -890,7 +880,67 @@ export default function App() {
 
     fetchBatch();
     const timer = setInterval(fetchBatch, 10000);
-    return () => clearInterval(timer);
+
+    // 行业关联指数：独立请求，用 idx_ 前缀存储避免与同代码股票冲突
+    const fetchIndustryIndices = () => {
+      const allIndustryIndices = [...new Map(
+        allIndustries.flatMap(ind => ind.indices || []).map(idx => [idx.c, idx])
+      ).values()];
+
+      if (allIndustryIndices.length === 0) return;
+
+      const secids = allIndustryIndices.map(idx => {
+        const mk = (idx.c.startsWith('399') || idx.c.startsWith('159')) ? '0' : '1';
+        return `${mk}.${idx.c}`;
+      }).join(',');
+
+      const cbName = `jsonp_indidx_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const timeoutId = setTimeout(() => {
+        delete (window as any)[cbName];
+        const scriptEl = document.getElementById(cbName);
+        if (scriptEl) scriptEl.remove();
+      }, 10000);
+
+      (window as any)[cbName] = (d: any) => {
+        clearTimeout(timeoutId);
+        if (d?.data?.diff) {
+          setBatchData(prev => {
+            const newData = { ...prev };
+            d.data.diff.forEach((item: any) => {
+              const code = item.f12;
+              const mkId = item.f13;
+              const pScale = mkId === 116 ? 1000 : 100;
+              const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
+              const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
+              // 用 idx_ 前缀存储，避免覆盖同代码的股票数据
+              newData[`idx_${code}`] = {
+                p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(2) : undefined,
+                cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
+                pe: valPos(item.f162, 100) || valPos(item.f9, 100),
+                pb: valPos(item.f167, 100) || valPos(item.f23, 100),
+                dy: valPos(item.f177, 100),
+                ps: valPos(item.f188, 100),
+                mcap: valPos(item.f20, 100000000) || valPos(item.f57, 100000000),
+              };
+            });
+            return newData;
+          });
+        }
+        delete (window as any)[cbName];
+        const scriptEl = document.getElementById(cbName);
+        if (scriptEl) scriptEl.remove();
+      };
+
+      const script = document.createElement('script');
+      script.id = cbName;
+      script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=f2,f3,f9,f12,f13,f20,f23,f57,f162,f167,f177,f188&cb=${cbName}`;
+      document.head.appendChild(script);
+    };
+
+    fetchIndustryIndices();
+    const idxTimer = setInterval(fetchIndustryIndices, 10000);
+
+    return () => { clearInterval(timer); clearInterval(idxTimer); };
   }, [allCodesStr]);
 
   // ─── 实时股票详情数据获取 ───
@@ -1589,7 +1639,7 @@ export default function App() {
               <div className="stat-label mb-2">相关指数</div>
               <div className="flex flex-wrap gap-2">
                 {ind.indices.map(idxInfo => {
-                  const bd = batchData[idxInfo.c];
+                  const bd = batchData[`idx_${idxInfo.c}`] || batchData[idxInfo.c];
                   return (
                     <button
                       key={idxInfo.c}
