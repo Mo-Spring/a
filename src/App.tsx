@@ -649,7 +649,7 @@ export default function App() {
       const timer = setTimeout(() => {
         StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
         StatusBar.setBackgroundColor({ color: darkMode ? '#0f172a' : '#ffffff' }).catch(() => {});
-        StatusBar.setStyle({ style: darkMode ? Style.Light : Style.Dark }).catch(() => {});
+        StatusBar.setStyle({ style: darkMode ? Style.Dark : Style.Light }).catch(() => {});
       }, 200);
       return () => clearTimeout(timer);
     }
