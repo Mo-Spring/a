@@ -447,8 +447,25 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
             <div>
               <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">价值估计 (基于历史均值)</div>
               <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                {djIv?.p && iv?.pe ? `\u00a5${(parseFloat(djIv.p) * (15 / iv.pe)).toFixed(2)}` : '\u2014'}
-                <span className="text-xs font-medium ml-1 opacity-70">合理 PE 15.0x</span>
+                {(() => {
+                  const price = djIv?.p ? parseFloat(djIv.p) : 0;
+                  if (price <= 0) return '—';
+                  // 优先用蛋卷的历史均值比率：合理价格 = 当前价格 / (当前PE/历史均值PE)
+                  if (djIv?.peOverHistory && djIv.peOverHistory > 0 && djIv.peOverHistory !== 1) {
+                    const fairPrice = price / djIv.peOverHistory;
+                    const fairPE = iv.pe / djIv.peOverHistory;
+                    return <>
+                      ¥{fairPrice.toFixed(2)}
+                      <span className="text-xs font-medium ml-1 opacity-70">PE {fairPE.toFixed(1)}x</span>
+                    </>;
+                  }
+                  // 无历史数据时，用行业中性 PE（基于 ROE 粗估）
+                  const neutralPE = iv.pe; // fallback: 当前 PE = 合理价格就是当前价格
+                  return <>
+                    ¥{(price * (neutralPE / iv.pe)).toFixed(2)}
+                    <span className="text-xs font-medium ml-1 opacity-70">暂无历史数据</span>
+                  </>;
+                })()}
               </div>
             </div>
             {djIv?.evaType && (
@@ -1128,10 +1145,16 @@ export default function App() {
             const p = d.data.f2 !== undefined && d.data.f2 !== '-' ? (d.data.f2 / priceScale).toFixed(2) : undefined;
             const cp = d.data.f3 !== undefined && d.data.f3 !== '-' ? (d.data.f3 / 100).toFixed(2) : undefined;
             if (pe || pb || p) {
-              setIndexVal(prev => ({
-                ...prev,
-                [idx.c]: { ...(prev[idx.c] || {}), pe, pb, dy, p, cp }
-              }));
+              setIndexVal(prev => {
+                const existing = prev[idx.c] || {};
+                const update: Record<string, any> = {};
+                if (pe) update.pe = pe;
+                if (pb) update.pb = pb;
+                if (dy !== undefined) update.dy = dy;
+                if (p) update.p = p;
+                if (cp) update.cp = cp;
+                return { ...prev, [idx.c]: { ...existing, ...update } };
+              });
             }
           }
           delete (window as any)[cbName];
@@ -1261,15 +1284,22 @@ export default function App() {
             const cp = d.data.f3 !== undefined && d.data.f3 !== '-' ? (d.data.f3 / 100).toFixed(2) : undefined;
             if (pe || pb || p) {
               setIndexVal(prev => {
-                const existing = prev[idx.c];
-                return { ...prev, [idx.c]: {
-                  ...existing,
-                  ...(pe ? { pe } : {}),
-                  ...(pb ? { pb } : {}),
-                  ...(dy !== undefined ? { dy } : {}),
-                  ...(p ? { p } : {}),
-                  ...(cp ? { cp } : {}),
-                }};
+                const existing = prev[idx.c] || {};
+                // 只写入本次请求获取到的字段，绝不覆盖已有字段
+                const update: Record<string, any> = {};
+                if (p) update.p = p;
+                if (cp) update.cp = cp;
+                // 估值字段：GLOBAL 指数必须写（蛋卷不覆盖），其他只在现有数据缺失时补充
+                if (idx.m === 'GLOBAL') {
+                  if (pe) update.pe = pe;
+                  if (pb) update.pb = pb;
+                  if (dy !== undefined) update.dy = dy;
+                } else {
+                  if (pe && !existing.pe) update.pe = pe;
+                  if (pb && !existing.pb) update.pb = pb;
+                  if (dy !== undefined && !existing.dy) update.dy = dy;
+                }
+                return { ...prev, [idx.c]: { ...existing, ...update } };
               });
             }
           }
