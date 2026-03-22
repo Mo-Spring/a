@@ -304,6 +304,8 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
   const djIv = indexVal[idx.c];
   // 指数数据完全来自专用 fetch（蛋卷 API + eastmoney 专用 JSONP），不再使用 batchData 避免代码碰撞
   const iv = djIv ? {
+    p: djIv.p,
+    cp: djIv.cp,
     pe: djIv.pe,
     pb: djIv.pb,
     dy: djIv.dy,
@@ -2635,10 +2637,10 @@ export default function App() {
 
                 {/* Row 2: price + change */}
                 <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                  {bd?.cp && (
-                    <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
+                  <span className="text-lg font-bold text-slate-900 tabular-nums">{iv?.p || bd?.p || '—'}</span>
+                  {(iv?.cp || bd?.cp) && (
+                    <span className={`text-xs font-bold tabular-nums ${parseFloat(iv?.cp || bd?.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {parseFloat(iv?.cp || bd?.cp) >= 0 ? '+' : ''}{iv?.cp || bd?.cp}%
                     </span>
                   )}
                 </div>
