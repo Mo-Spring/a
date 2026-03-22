@@ -905,7 +905,14 @@ export default function App() {
       if (allIndustryIndices.length === 0) return;
 
       const secids = allIndustryIndices.map(idx => {
-        const mk = (idx.c.startsWith('399') || idx.c.startsWith('159')) ? '0' : '1';
+        let mk: string;
+        if (idx.c === 'HSTECH' || idx.c === 'HSI' || idx.c === 'HSCEI') {
+          mk = '100';
+        } else if (idx.c.startsWith('399') || idx.c.startsWith('159')) {
+          mk = '0';
+        } else {
+          mk = '1';
+        }
         return `${mk}.${idx.c}`;
       }).join(',');
 
