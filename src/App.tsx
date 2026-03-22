@@ -362,10 +362,10 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
             <div className="text-xs text-slate-400 font-mono mt-1">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '国外'}</div>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold text-slate-900">{djIv?.p || '\u2014'}</div>
-            {djIv?.cp && (
-              <div className={`text-sm font-bold ${parseFloat(djIv.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                {parseFloat(djIv.cp) >= 0 ? '+' : ''}{djIv.cp}%
+            <div className="text-2xl font-bold text-slate-900">{batchData[idx.c]?.p || djIv?.p || '\u2014'}</div>
+            {(batchData[idx.c]?.cp || djIv?.cp) && (
+              <div className={`text-sm font-bold ${parseFloat(batchData[idx.c]?.cp || djIv.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                {parseFloat(batchData[idx.c]?.cp || djIv.cp) >= 0 ? '+' : ''}{batchData[idx.c]?.cp || djIv.cp}%
               </div>
             )}
           </div>
@@ -738,11 +738,24 @@ export default function App() {
     const fetchBatch = () => {
       const allCodes = allIndustries.flatMap(ind => ind.l2.flatMap(sub => sub.cs));
       const bkCodes = allIndustries.filter(ind => ind.bk).map(ind => ({ c: ind.bk, market: 'BK' }));
-      const combined = [...allCodes, ...bkCodes];
+      // 用户添加的指数：用市场前缀 secid 区分同代码股票/指数
+      const userIdxCodes = indices.map(idx => ({ c: idx.c, market: 'IDX', mk: idx.mk, m: idx.m }));
+      const combined = [...allCodes, ...bkCodes, ...userIdxCodes];
       if (combined.length === 0) return;
 
       const secidsList = combined.map(c => {
         if (c.market === 'BK') return `90.${c.c}`;
+        if (c.market === 'IDX') {
+          if (c.m === 'GLOBAL') return `100.${c.c}`;
+          if (c.m === 'HK') {
+            if (['HSI', 'HSCEI', 'HSTECH'].includes(c.c)) return `100.${c.c}`;
+            return c.mk ? `${c.mk}.${c.c}` : `116.${c.c}`;
+          }
+          // A-share: use stored mk, or guess from code
+          if (c.mk) return `${c.mk}.${c.c}`;
+          const mk = (c.c.startsWith('399') || c.c.startsWith('159')) ? '0' : '1';
+          return `${mk}.${c.c}`;
+        }
         if (c.market === 'HK') {
           if (['HSI', 'HSCEI', 'HSTECH'].includes(c.c)) return `100.${c.c}`;
           return `116.${c.c}`;
@@ -2637,10 +2650,10 @@ export default function App() {
 
                 {/* Row 2: price + change */}
                 <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-lg font-bold text-slate-900 tabular-nums">{iv?.p || bd?.p || '—'}</span>
-                  {(iv?.cp || bd?.cp) && (
-                    <span className={`text-xs font-bold tabular-nums ${parseFloat(iv?.cp || bd?.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {parseFloat(iv?.cp || bd?.cp) >= 0 ? '+' : ''}{iv?.cp || bd?.cp}%
+                  <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || iv?.p || '—'}</span>
+                  {(bd?.cp || iv?.cp) && (
+                    <span className={`text-xs font-bold tabular-nums ${parseFloat(bd?.cp || iv?.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {parseFloat(bd?.cp || iv?.cp) >= 0 ? '+' : ''}{bd?.cp || iv?.cp}%
                     </span>
                   )}
                 </div>
