@@ -48,6 +48,19 @@ export interface NavigationState {
   args: any[];
 }
 
+// ─── 数据质量追踪 ───
+
+export interface DataQuality {
+  /** 实时行情是否成功 */
+  quoteOk: boolean;
+  /** 财务历史是否成功 */
+  historyOk: boolean;
+  /** 关键字段缺失列表 */
+  missingFields: string[];
+  /** 估值可信度: high=数据充足, medium=部分缺失, low=大量缺失 */
+  confidence: 'high' | 'medium' | 'low';
+}
+
 // ─── 估值模型参数 ───
 
 export interface DCFParams {
