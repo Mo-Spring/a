@@ -4,6 +4,8 @@
  * 使用 JSONP 避免 CORS 问题
  */
 
+import type { DataQuality } from '../types';
+
 // ─── JSONP 工具函数 ───
 
 function jsonp(url: string, callbackName: string, timeoutMs = 8000): Promise<any> {
@@ -70,6 +72,8 @@ export interface CompleteStockData {
   // 元数据
   source: 'live' | 'cached' | 'static';
   fetchedAt: number;
+  // 数据质量追踪
+  dataQuality: DataQuality;
 }
 
 export interface FinancialSummary {
@@ -145,7 +149,6 @@ async function fetchEastmoneyQuote(code: string, market: 'A' | 'HK'): Promise<Pa
  */
 async function fetchFinancialHistory(code: string, market: 'A' | 'HK'): Promise<FinancialSummary | null> {
   try {
-    // 东方财富数据中心 - 主要财务指标
     const cbName = `em_fin_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
     const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=SECURITY_CODE,REPORT_DATE,BASIC_EPS,WEIGHTAVG_ROE,OPERATE_INCOME,PARENT_NETPROFIT,YSTZ,SJLTZ,MGJYXJJE,ASSIGNDSCRPT&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
@@ -189,6 +192,38 @@ async function fetchFinancialHistory(code: string, market: 'A' | 'HK'): Promise<
   }
 }
 
+// ─── 数据质量评估 ───
+
+function assessDataQuality(data: CompleteStockData, quoteOk: boolean, historyOk: boolean): DataQuality {
+  const missingFields: string[] = [];
+
+  // 检查关键估值字段
+  if (!data.price || data.price <= 0) missingFields.push('price');
+  if (!data.pe || data.pe <= 0) missingFields.push('pe');
+  if (!data.pb || data.pb <= 0) missingFields.push('pb');
+  if (!data.eps || data.eps <= 0) missingFields.push('eps');
+  if (!data.roe || data.roe <= 0) missingFields.push('roe');
+  if (!data.mcap || data.mcap <= 0) missingFields.push('mcap');
+
+  // 检查历史数据
+  if (!historyOk) missingFields.push('history');
+
+  // 检查增长率
+  if (!data.revenueGrowth && !data.netIncomeGrowth) missingFields.push('growth');
+
+  // 信心评级
+  let confidence: 'high' | 'medium' | 'low';
+  if (missingFields.length === 0 && quoteOk && historyOk) {
+    confidence = 'high';
+  } else if (missingFields.length <= 3 && quoteOk) {
+    confidence = 'medium';
+  } else {
+    confidence = 'low';
+  }
+
+  return { quoteOk, historyOk, missingFields, confidence };
+}
+
 // ─── 合并数据源 ───
 
 /**
@@ -229,9 +264,16 @@ export async function fetchCompleteStockData(
     history: null,
     source: 'static',
     fetchedAt: Date.now(),
+    dataQuality: { quoteOk: false, historyOk: false, missingFields: [], confidence: 'low' },
   };
 
-  if (market === 'GLOBAL') return result;
+  if (market === 'GLOBAL') {
+    result.dataQuality = assessDataQuality(result, false, false);
+    return result;
+  }
+
+  let quoteOk = false;
+  let historyOk = false;
 
   try {
     // 并行获取
@@ -242,6 +284,7 @@ export async function fetchCompleteStockData(
 
     // 合并实时行情
     if (quoteResult.status === 'fulfilled' && quoteResult.value) {
+      quoteOk = true;
       const q = quoteResult.value;
       if (q.price && q.price > 0) {
         result.price = q.price;
@@ -262,10 +305,14 @@ export async function fetchCompleteStockData(
       if (q.grossMargin) result.grossMargin = q.grossMargin;
       if (q.netMargin) result.netMargin = q.netMargin;
       if (q.totalDebt) result.totalDebt = q.totalDebt;
+      if (q.revenueGrowth) result.revenueGrowth = q.revenueGrowth;
+      if (q.netIncomeGrowth) result.netIncomeGrowth = q.netIncomeGrowth;
+      if (q.dividendPerShare) result.dividendPerShare = q.dividendPerShare;
     }
 
     // 合并历史数据
     if (historyResult.status === 'fulfilled' && historyResult.value) {
+      historyOk = true;
       result.history = historyResult.value;
       const h = historyResult.value;
 
@@ -289,6 +336,7 @@ export async function fetchCompleteStockData(
     console.error(`[fetchCompleteStockData] Error for ${code}:`, e);
   }
 
+  result.dataQuality = assessDataQuality(result, quoteOk, historyOk);
   return result;
 }
 
