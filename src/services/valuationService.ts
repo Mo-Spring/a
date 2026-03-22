@@ -190,37 +190,71 @@ export function calculateDCF(data: CompleteStockData, params?: DCFParams): DCFRe
 }
 
 /**
- * 根据 PE、ROE、历史波动连续估算 Beta
- * 不再用离散档位，而是用连续公式
+ * 根据多维特征估算 Beta
  *
- * 逻辑：
- * - 高 PE → 高 Beta（市场预期高，波动大）
- * - 高 ROE → 低 Beta（盈利能力强，相对稳定）
- * - 两者交叉修正
+ * 维度：
+ * - 净利润波动性（最重要，直接反映经营风险）
+ * - 市值（小盘股波动更大）
+ * - 负债率（高杠杆放大波动）
+ * - 营收增长波动（成长股 vs 价值股）
+ * - PE（高 PE 意味着高预期，波动更大）
  */
 function estimateBeta(data: CompleteStockData): number {
-  const pe = validNum(data.pe, 20);    // 默认 20
-  const roe = validNum(data.roe, 10) / 100;  // 默认 10%
+  let beta = 1.0; // 市场基准
 
-  // PE 贡献：PE 从 5 到 100，Beta 从 0.7 到 1.4
-  const peComponent = 0.7 + 0.7 * clamp((pe - 5) / 95, 0, 1);
-
-  // ROE 贡献：ROE 从 0 到 30%，Beta 减少 0 到 0.3
-  const roeDiscount = 0.3 * clamp(roe / 0.30, 0, 1);
-
-  // 历史净利润波动（如果有历史数据）
-  let volatilityAdjust = 0;
+  // ① 净利润波动性（最核心因子，权重最高）
   if (data.history && data.history.netIncomes.length >= 3) {
     const incomes = data.history.netIncomes.filter(v => v > 0);
     if (incomes.length >= 2) {
       const mean = incomes.reduce((a, b) => a + b, 0) / incomes.length;
       const stdDev = Math.sqrt(incomes.reduce((s, v) => s + (v - mean) ** 2, 0) / incomes.length);
-      const cv = mean > 0 ? stdDev / mean : 0; // 变异系数
-      volatilityAdjust = clamp(cv * 0.5, 0, 0.3); // 波动大 → Beta +0~0.3
+      const cv = mean > 0 ? stdDev / mean : 0;
+      // CV 0~0.2 → Beta -0.2~0, CV 0.2~0.8 → Beta 0~+0.5
+      beta += clamp((cv - 0.15) * 1.2, -0.25, 0.5);
+    }
+    // 连续多年下滑 → 额外加 Beta
+    const trend = incomes.slice(0, 3);
+    if (trend.length >= 2 && trend[0] < trend[trend.length - 1]) {
+      beta += 0.1; // 利润在走下坡
+    }
+  } else {
+    // 无历史数据，默认偏高 Beta（不确定性溢价）
+    beta += 0.15;
+  }
+
+  // ② 市值因子（小盘效应）
+  if (data.mcap > 0) {
+    if (data.mcap < 50) beta += 0.25;        // 微盘 <50亿
+    else if (data.mcap < 200) beta += 0.15;  // 小盘 50-200亿
+    else if (data.mcap < 1000) beta += 0.05; // 中盘 200-1000亿
+    else if (data.mcap > 3000) beta -= 0.1;  // 大盘 >3000亿
+    // 200-3000亿之间无调整
+  }
+
+  // ③ 负债率（杠杆放大波动）
+  if (data.totalDebt > 0) {
+    if (data.totalDebt > 70) beta += 0.15;
+    else if (data.totalDebt > 50) beta += 0.08;
+    else if (data.totalDebt < 20) beta -= 0.05;
+  }
+
+  // ④ 营收增长波动（成长股 vs 稳健股）
+  if (data.history && data.history.revenueGrowths.length >= 3) {
+    const growths = data.history.revenueGrowths.filter(g => g !== 0);
+    if (growths.length >= 2) {
+      const mean = growths.reduce((a, b) => a + b, 0) / growths.length;
+      const stdDev = Math.sqrt(growths.reduce((s, g) => s + (g - mean) ** 2, 0) / growths.length);
+      if (stdDev > 20) beta += 0.1; // 营收波动很大
+      if (mean > 30) beta += 0.05;  // 高增长本身带波动
     }
   }
 
-  return clamp(peComponent - roeDiscount + volatilityAdjust, 0.5, 2.0);
+  // ⑤ PE 辅助修正（幅度收窄，不再是主要因子）
+  const pe = validNum(data.pe, 20);
+  if (pe > 50) beta += 0.08;
+  else if (pe < 10 && pe > 0) beta -= 0.05;
+
+  return clamp(beta, 0.4, 2.5);
 }
 
 /**
@@ -280,6 +314,20 @@ function estimateGrowthPhases(data: CompleteStockData, totalYears: number, roe: 
   if (growthEstimates.length > 0) {
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     baseGrowth = growthEstimates.reduce((sum, g, i) => sum + g * weights[i], 0) / totalWeight;
+  } else {
+    // 无数据时：根据公司特征差异化默认增长率
+    if (roe > 0.2) baseGrowth = 0.08;           // 高 ROE → 默认高增长
+    else if (roe > 0.15) baseGrowth = 0.06;
+    else if (roe > 0.1) baseGrowth = 0.04;
+    else baseGrowth = 0.02;
+
+    // 市值修正：大公司增长更慢
+    if (data.mcap > 2000) baseGrowth *= 0.7;
+    else if (data.mcap > 500) baseGrowth *= 0.85;
+    else if (data.mcap < 50) baseGrowth *= 1.3; // 小公司增长空间更大
+
+    // 高分红公司增长更慢
+    if (data.dy > 4) baseGrowth *= 0.7;
   }
 
   // 用 ROE 作为增长上限约束
@@ -312,19 +360,24 @@ function getPhaseForYear(phases: Array<{ years: number; growth: number }>, year:
 }
 
 /**
- * 连续估算总股本
+ * 估算总股本
  * 优先用市值/价格推算
  */
 function estimateShares(data: CompleteStockData): number {
   if (data.mcap > 0 && data.price > 0) {
     return (data.mcap * 1e8) / data.price;
   }
-  if (data.eps > 0 && data.pe > 0 && data.mcap > 0) {
+  if (data.eps > 0 && data.pe > 0) {
     const impliedPrice = data.eps * data.pe;
-    if (impliedPrice > 0) {
+    if (impliedPrice > 0 && data.mcap > 0) {
       return (data.mcap * 1e8) / impliedPrice;
     }
   }
+  // Fallback：用 EPS 和净利润推算
+  if (data.eps > 0 && data.netIncome > 0) {
+    return (data.netIncome * 1e8) / data.eps;
+  }
+  // 最终兜底：返回一个不会导致除零的值，但标记不确定性
   return 1;
 }
 
@@ -354,22 +407,43 @@ export function calculatePERelative(
     : 0.5;
   const industryFairPE = industryPE * roeAdjustment;
 
-  // ② 历史 PE：用当前 PE 作为历史估值参考
+  // ② 历史 PE 中位数
+  // 优先：如果有多年 ROE 历史数据，用 ROE 趋势推算历史合理 PE
+  // 次选：用行业 PE × 特征调整
+  // 核心原则：不用当前 PE 作为"合理 PE"（避免循环论证）
   let historicalFairPE = industryPE;
-  if (data.pe > 0 && data.pe < 500) {
-    historicalFairPE = data.pe;
-  } else if (data.history && data.history.years.length >= 2) {
-    // 如果有历史数据，用历史 PE 作为参考
+  if (data.history && data.history.roes.length >= 3) {
+    // 有多年 ROE：用平均 ROE 相对行业推算历史合理 PE
+    const avgROE = data.history.roes.slice(0, 3).reduce((a, b) => a + b, 0) / Math.min(3, data.history.roes.length);
+    if (avgROE > 0 && industryPE > 0) {
+      // 逻辑：ROE 越高的公司，市场给的合理 PE 越高
+      // 用 ROE/行业平均ROE 比值调整行业 PE
+      const roeRatio = clamp(avgROE / 15, 0.3, 3.0); // 15% 为基准
+      historicalFairPE = industryPE * roeRatio;
+    }
+  } else if (currentROE > 0 && industryPE > 0) {
+    // 有当前 ROE：连续调整
+    const roeRatio = clamp(currentROE / 0.15, 0.3, 3.0);
+    historicalFairPE = industryPE * roeRatio;
+  } else {
+    // 兜底：直接用行业 PE（至少不是循环论证）
     historicalFairPE = industryPE;
   }
+  historicalFairPE = clamp(historicalFairPE, 3, 150);
 
   // ③ PEG 修正：合理 PE = 增长率 × 100（PEG=1）
-  // 增长率 0% → PE = 行业×0.3；增长率 20% → PE = 20
   let growthPE: number;
   if (currentGrowth > 0.02) {
+    // 有实际增长数据：PEG=1 对应合理 PE
     growthPE = currentGrowth * 100;
+  } else if (currentROE > 0) {
+    // 无增长数据：用可持续增长率 g = ROE × 留存率 推算
+    const payoutEst = data.dy > 3 ? 0.4 : data.dy > 1 ? 0.6 : 0.8;
+    const sustainableGrowth = currentROE * payoutEst;
+    growthPE = clamp(sustainableGrowth * 100, 3, 60);
   } else {
-    growthPE = industryPE * 0.4;
+    // 兜底：行业中性值
+    growthPE = industryPE * 0.5;
   }
 
   // 权重分配
@@ -427,16 +501,17 @@ export function calculatePERelative(
  * 对于低分红公司，用 RIM（剩余收益模型）近似：
  * V = BV + Σ (ROE - r) × BV₍ₜ₋₁₎ / (1+r)ᵗ
  */
-export function calculateGordon(data: CompleteStockData, params?: GordonParams): GordonResult {
+export function calculateGordon(data: CompleteStockData, params?: GordonParams, dcfParams?: DCFParams): GordonResult {
   const p = params || VALUATION_PRESETS.neutral.config.gordon;
   const currentBVPS = validNum(data.bvps, 0);
   const currentROE = data.roe > 0 ? data.roe / 100 : 0;
   const currentDY = data.dy > 0 ? data.dy / 100 : 0;
   const currentEPS = validNum(data.eps, 0);
 
-  // 要求回报率（连续计算）
-  const Rf = 0.025;
-  const ERP = 0.06;
+  // 要求回报率（使用 DCF 配置参数，保持一致）
+  const dcf = dcfParams || VALUATION_PRESETS.neutral.config.dcf;
+  const Rf = dcf.rf;
+  const ERP = dcf.erp;
   const beta = estimateBeta(data);
   const requiredReturn = Rf + beta * ERP;
 
@@ -475,24 +550,27 @@ export function calculateGordon(data: CompleteStockData, params?: GordonParams):
     const rimYears = 10;
     let rimValue = currentBVPS;
     let bv = currentBVPS;
-    const roeFadeRate = (currentROE - requiredReturn) * 0.05; // ROE 每年衰减
+    // ROE 衰减：高 ROE 衰减更快，低 ROE 衰减更慢
+    // 10 年内 ROE 从当前值收敛到 requiredReturn + 2%
+    const targetROE = requiredReturn + 0.02;
+    const roeFadeRate = currentROE > targetROE ? (currentROE - targetROE) / rimYears : 0;
 
     for (let y = 1; y <= rimYears; y++) {
-      const yearROE = Math.max(currentROE - (y - 1) * roeFadeRate, requiredReturn);
+      const yearROE = Math.max(currentROE - (y - 1) * roeFadeRate, targetROE);
       const residualIncome = (yearROE - requiredReturn) * bv;
       if (residualIncome > 0) {
         rimValue += residualIncome / Math.pow(1 + requiredReturn, y);
       }
-      // 账面价值增长也逐 year 衰减
-      const yearGrowth = currentROE * retentionRatio * Math.pow(0.95, y);
+      // 账面价值增长
+      const yearGrowth = yearROE * retentionRatio;
       bv = bv * (1 + yearGrowth);
     }
 
-    // 终值
-    const terminalROE = Math.max(currentROE - rimYears * roeFadeRate, requiredReturn + 0.01);
-    const terminalRI = (terminalROE - requiredReturn) * bv;
+    // 终值（永续剩余收益，折现率取 requiredReturn - 永续增长率）
+    const terminalROE = targetROE;
+    const terminalRI = Math.max((terminalROE - requiredReturn) * bv, 0);
     if (terminalRI > 0) {
-      const tv = terminalRI / (requiredReturn - 0.03);
+      const tv = terminalRI / (requiredReturn - 0.025); // 永续增长率 2.5%
       rimValue += tv / Math.pow(1 + requiredReturn, rimYears);
     }
 
@@ -530,31 +608,43 @@ export function calculateGordon(data: CompleteStockData, params?: GordonParams):
 
 /**
  * 连续估算分红比例
- * 不再用离散档位，而是用 PE 和 ROE 连续插值
+ * 基于多个公司特征连续计算
  */
 function estimatePayoutRatio(data: CompleteStockData): number {
   const roe = data.roe > 0 ? data.roe / 100 : 0.1;
   const pe = validNum(data.pe, 20);
   const dy = data.dy > 0 ? data.dy / 100 : 0;
 
-  // 如果有实际股息率，直接用
+  // 如果有实际股息率和 EPS，直接用
   if (dy > 0 && data.price > 0 && data.eps > 0) {
-    return clamp(dy / (data.eps / data.price), 0, 1);
+    const actualPayout = dy / (data.eps / data.price);
+    if (actualPayout > 0 && actualPayout <= 1) return actualPayout;
   }
 
-  // 连续公式：高 ROE + 低 PE → 高分红；高 PE → 低分红（成长期）
   // 基准分红比例 30%
   let payout = 0.30;
 
-  // ROE 修正：ROE 越高，分红越多（盈利能力强）
-  // ROE 5%→-10%, ROE 25%→+15%
-  payout += (roe - 0.15) * 0.5;
+  // ROE 修正：高 ROE 公司有能力分红更多，但也可能留存扩张
+  // 但 ROE 高 + PE 低 = 价值股，应该多分红
+  if (roe > 0.2 && pe < 20) payout += 0.15;      // 高盈利低估值 → 高分红
+  else if (roe > 0.15) payout += 0.05;
+  else if (roe < 0.08) payout -= 0.05;            // 低盈利 → 少分红
 
-  // PE 修正：PE 越高，分红越少（成长期保留利润）
-  // PE 10→+10%, PE 50→-15%
-  payout -= (pe - 20) * 0.005;
+  // 市值修正：大公司通常分红更多
+  if (data.mcap > 1000) payout += 0.1;
+  else if (data.mcap < 100) payout -= 0.1;
 
-  return clamp(payout, 0.05, 0.7);
+  // 历史分红如果有，用历史数据
+  if (data.history && data.history.payoutRatios.length > 0) {
+    const validRatios = data.history.payoutRatios.filter(r => r > 0 && r <= 1);
+    if (validRatios.length > 0) {
+      const avgPayout = validRatios.reduce((a, b) => a + b, 0) / validRatios.length;
+      // 历史数据占 60% 权重
+      payout = payout * 0.4 + avgPayout * 0.6;
+    }
+  }
+
+  return clamp(payout, 0.05, 0.8);
 }
 
 // ─── 综合估值 ───
@@ -575,7 +665,7 @@ export function calculateValuationSummary(
   const cfg = config || VALUATION_PRESETS.neutral.config;
   const dcf = calculateDCF(data, cfg.dcf);
   const peRelative = calculatePERelative(data, industryPE, cfg.pe);
-  const gordon = calculateGordon(data, cfg.gordon);
+  const gordon = calculateGordon(data, cfg.gordon, cfg.dcf);
 
   // 动态权重（基于数据质量）
   const isHighDividend = data.dy > 3;
