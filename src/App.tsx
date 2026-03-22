@@ -441,45 +441,6 @@ const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndi
           </div>
         )}
 
-        {/* 价值估计 */}
-        {iv?.pe && iv.pe > 0 && (
-          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
-            <div>
-              <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">价值估计 (基于历史均值)</div>
-              <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                {(() => {
-                  const price = djIv?.p ? parseFloat(djIv.p) : 0;
-                  if (price <= 0) return '—';
-                  // 优先用蛋卷的历史均值比率：合理价格 = 当前价格 / (当前PE/历史均值PE)
-                  if (djIv?.peOverHistory && djIv.peOverHistory > 0 && djIv.peOverHistory !== 1) {
-                    const fairPrice = price / djIv.peOverHistory;
-                    const fairPE = iv.pe / djIv.peOverHistory;
-                    return <>
-                      ¥{fairPrice.toFixed(2)}
-                      <span className="text-xs font-medium ml-1 opacity-70">PE {fairPE.toFixed(1)}x</span>
-                    </>;
-                  }
-                  // 无历史数据时，用行业中性 PE（基于 ROE 粗估）
-                  const neutralPE = iv.pe; // fallback: 当前 PE = 合理价格就是当前价格
-                  return <>
-                    ¥{(price * (neutralPE / iv.pe)).toFixed(2)}
-                    <span className="text-xs font-medium ml-1 opacity-70">暂无历史数据</span>
-                  </>;
-                })()}
-              </div>
-            </div>
-            {djIv?.evaType && (
-              <div className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm ${
-                djIv.evaType === 'low' ? 'bg-emerald-50 text-emerald-600' :
-                djIv.evaType === 'high' ? 'bg-red-50 text-red-600' :
-                'bg-amber-50 text-amber-600'
-              }`}>
-                {djIv.evaType === 'low' ? '低估' : djIv.evaType === 'high' ? '高估' : '适中'}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* PE/PB 百分位 */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-2xl p-4">
