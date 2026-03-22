@@ -67,12 +67,12 @@ export const DEFAULT_INDICES: Index[] = [
   { c: 'SPHCMSHP', n: '香港中小', m: 'HK', mk: '116' },
 
   // ──── 海外指数 ────
-  { c: 'SP500', n: '标普500', m: 'GLOBAL' },
-  { c: 'SPACEVCP', n: '标普价值', m: 'GLOBAL' },
-  { c: 'CSPSADRP', n: '标普红利', m: 'GLOBAL' },
-  { c: 'SPCQVCP', n: '标普质量', m: 'GLOBAL' },
-  { c: 'NDX', n: '纳指100', m: 'GLOBAL' },
-  { c: 'GDAXI', n: '德国DAX', m: 'GLOBAL' },
-  { c: '716567', n: 'MSCI中国', m: 'GLOBAL' },
-  { c: '935600', n: 'MSCI印度', m: 'GLOBAL' },
+  { c: 'SP500', n: '标普500', m: 'GLOBAL', mk: '100' },
+  { c: 'SPACEVCP', n: '标普价值', m: 'GLOBAL', mk: '100' },
+  { c: 'CSPSADRP', n: '标普红利', m: 'GLOBAL', mk: '100' },
+  { c: 'SPCQVCP', n: '标普质量', m: 'GLOBAL', mk: '100' },
+  { c: 'NDX', n: '纳指100', m: 'GLOBAL', mk: '100' },
+  { c: 'GDAXI', n: '德国DAX', m: 'GLOBAL', mk: '100' },
+  { c: '716567', n: 'MSCI中国', m: 'GLOBAL', mk: '105' },
+  { c: '935600', n: 'MSCI印度', m: 'GLOBAL', mk: '105' },
 ];
