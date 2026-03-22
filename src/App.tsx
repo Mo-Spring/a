@@ -1385,7 +1385,8 @@ export default function App() {
         pb: bkd.pb,
         dy: bkd.dy,
         cp: bkd.cp,
-        roe: (bkd.pe && bkd.pb && Number(bkd.pe) > 0) ? ((Number(bkd.pb) / Number(bkd.pe)) * 100).toFixed(1) : undefined,
+        ps: bkd.ps,
+        mcap: bkd.mcap,
         source: 'index'
       };
     }
@@ -1413,9 +1414,8 @@ export default function App() {
     const avgPB = pbCount > 0 ? (totalPB / pbCount).toFixed(2) : undefined;
     const avgDY = dyCount > 0 ? (totalDY / dyCount).toFixed(2) : undefined;
     const avgCP = cpCount > 0 ? (totalCP / cpCount).toFixed(2) : undefined;
-    const avgROE = (avgPE && avgPB && Number(avgPE) > 0) ? ((Number(avgPB) / Number(avgPE)) * 100).toFixed(1) : undefined;
 
-    return { pe: avgPE, pb: avgPB, roe: avgROE, dy: avgDY, cp: avgCP, source: 'calc' };
+    return { pe: avgPE, pb: avgPB, dy: avgDY, cp: avgCP, source: 'calc' };
   };
 
   const renderHome = () => (
@@ -1603,12 +1603,14 @@ export default function App() {
             {[
               { label: 'PE', val: indVal.pe || '—' },
               { label: 'PB', val: indVal.pb || '—' },
-              { label: 'ROE', val: indVal.roe ? `${indVal.roe}%` : '—' },
+              { label: 'PS', val: indVal.ps || '—' },
               { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '—' },
+              { label: '涨跌幅', val: indVal.cp !== undefined ? `${parseFloat(indVal.cp) >= 0 ? '+' : ''}${indVal.cp}%` : '—' },
+              { label: '总市值', val: indVal.mcap ? `${Number(indVal.mcap).toFixed(0)}亿` : '—' },
             ].map(m => (
               <div key={m.label} className="stat-cell">
                 <div className="stat-label">{m.label}</div>
-                <div className={`stat-value ${m.color || ''}`}>{m.val}</div>
+                <div className="stat-value">{m.val}</div>
               </div>
             ))}
           </div>
