@@ -1,3260 +1,645 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * 估值模型服务
+ * DCF 现金流折现 / PE 相对估值 / Gordon 股利折现
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  TrendingUp, 
-  Search, 
-  Bot, 
-  Star, 
-  Settings, 
-  ChevronRight, 
-  ArrowLeft, 
-  Loader2, 
-  Send,
-  AlertCircle,
-  Trash2,
-  LayoutGrid,
-  MessageSquarePlus,
-  MessageSquare,
-  Plus,
-  X,
-  MoreVertical,
-  Moon,
-  Sun,
-  GripVertical,
-  CheckSquare,
-  Square,
-  RotateCcw
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Industry, Company, AIConfig, ViewType, NavigationState, Index, ValuationConfig, VALUATION_PRESETS, PresetName } from './types';
-import { INDUSTRIES, HK_INDUSTRIES, DEFAULT_CONFIG, PROVIDERS } from './constants';
-import { DEFAULT_INDICES } from './indices';
-import { getAIResponse } from './services/aiService';
-import { fetchStockDataCached, CompleteStockData, clearStockCache } from './services/stockDataService';
-import { calculateValuationSummary, ValuationSummary } from './services/valuationService';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { App as CapApp } from '@capacitor/app';
-import { StatusBar, Style } from '@capacitor/status-bar';
+import type { CompleteStockData } from './stockDataService';
+import type { ValuationConfig, DCFParams, PERelativeParams, GordonParams } from '../types';
+import { VALUATION_PRESETS } from '../types';
 
-interface SearchViewProps {
-  allIndustries: Industry[];
-  customCompanies: any[];
-  indices: Index[];
-  setIndices: (indices: Index[]) => void;
-  searchQuery: string;
-  setSearchQuery: (query: string) => void;
-  navigate: (view: ViewType, ...args: any[]) => void;
-  setMarket: (market: 'A' | 'HK' | 'GLOBAL') => void;
-  setIndexMarket: (market: 'A' | 'HK' | 'GLOBAL') => void;
-  handleAiAddCompany: () => void;
-  isAddingCompany: boolean;
-  aiAddError: string | null;
-  handleAiAddIndex: () => void;
-  isAddingIndex: boolean;
-  aiIndexError: string | null;
+// ─── 类型定义 ───
+
+export interface DCFResult {
+  /** 内在价值（每股） */
+  intrinsicValue: number;
+  /** 隐含合理 PE */
+  impliedPE: number;
+  /** 参数 */
+  params: {
+    wacc: number;
+    growthPhases: Array<{ years: number; growth: number }>;
+    terminalGrowth: number;
+    currentEPS: number;
+    currentFCF: number;
+    projectionYears: number;
+  };
+  /** 每年折现现金流明细 */
+  projection: Array<{ year: number; fcf: number; discountedFCF: number }>;
+  /** 终值 */
+  terminalValue: number;
+  discountedTerminalValue: number;
+  /** 安全边际 */
+  marginOfSafety: number;
+  confidence: 'high' | 'medium' | 'low';
 }
 
-const SearchView = ({
-  allIndustries,
-  customCompanies,
-  indices,
-  setIndices,
-  searchQuery,
-  setSearchQuery,
-  navigate,
-  setMarket,
-  setIndexMarket,
-  handleAiAddCompany,
-  isAddingCompany,
-  aiAddError,
-  handleAiAddIndex,
-  isAddingIndex,
-  aiIndexError
-}: SearchViewProps) => {
-  const [searchType, setSearchType] = useState<'stock' | 'index'>('stock');
-  const [remoteResults, setRemoteResults] = useState<any[]>([]);
-  
-  // Clear search query when switching search type
-  const handleTypeSwitch = (type: 'stock' | 'index') => {
-    setSearchType(type);
-    setSearchQuery('');
-    setRemoteResults([]);
+export interface PERelativeResult {
+  /** 隐含合理 PE */
+  fairPE: number;
+  /** 隐含合理价格 */
+  fairPrice: number;
+  /** 参数 */
+  params: {
+    industryPE: number;
+    historicalPE: number;
+    roeAdjustment: number;
+    growthAdjustment: number;
+    currentROE: number;
+    currentGrowth: number;
   };
+  /** 来源权重 */
+  weights: { industry: number; historical: number; growth: number };
+  confidence: 'high' | 'medium' | 'low';
+}
 
-  const results: any[] = [];
-  
-  if (searchType === 'stock' && searchQuery.length > 0) {
-    allIndustries.forEach((ind, ii) => ind.l2.forEach(s => (s.cs || []).forEach(c => {
-      if (c.n.includes(searchQuery) || c.c.includes(searchQuery)) {
-        results.push({ ...c, sn: s.nm, ii, ic: ind.ic, market: ind.market || 'A', source: 'industry' });
-      }
-    })));
-    customCompanies.forEach(c => {
-      if (c.n.includes(searchQuery) || c.c.includes(searchQuery)) {
-        results.push({ ...c, sn: c.subIndName, ii: -1, ic: c.ic || '🏢', market: c.market || 'A', source: 'custom' });
-      }
-    });
+export interface GordonResult {
+  /** Gordon 模型隐含价值（每股） */
+  intrinsicValue: number;
+  /** 隐含合理 PE */
+  impliedPE: number;
+  /** 隐含合理 PB */
+  impliedPB: number;
+  /** 参数 */
+  params: {
+    currentDividend: number;
+    dividendGrowthRate: number;
+    requiredReturn: number;
+    retentionRatio: number;
+    roe: number;
+  };
+  /** 安全边际 */
+  marginOfSafety: number;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface ValuationSummary {
+  dcf: DCFResult;
+  peRelative: PERelativeResult;
+  gordon: GordonResult;
+  /** 加权综合合理 PE */
+  compositeFairPE: number;
+  /** 加权综合合理价格 */
+  compositeFairPrice: number;
+  /** 当前价格 */
+  currentPrice: number;
+  /** 综合安全边际 % */
+  compositeMargin: number;
+  /** 估值结论 */
+  verdict: 'deeply_undervalued' | 'undervalued' | 'fair' | 'overvalued' | 'deeply_overvalued';
+  verdictText: string;
+  /** 各模型信心权重 */
+  modelWeights: { dcf: number; pe: number; gordon: number };
+}
+
+// ─── 工具函数 ───
+
+/** 安全取值：>0 才算有效，否则返回 fallback */
+function validNum(v: number, fallback: number): number {
+  return typeof v === 'number' && isFinite(v) && v > 0 ? v : fallback;
+}
+
+/** 限幅 */
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// ─── DCF 现金流折现模型 ───
+
+/**
+ * 多阶段 DCF 模型
+ *
+ * 阶段1: 高速增长期（基于历史增长率和行业判断）
+ * 阶段2: 过渡增长期（增长率逐步收敛到永续增长率）
+ * 终值: Gordon Growth Model
+ *
+ * WACC = Rf + β × ERP（资本资产定价模型）
+ */
+export function calculateDCF(data: CompleteStockData, params?: DCFParams): DCFResult {
+  const p = params || VALUATION_PRESETS.neutral.config.dcf;
+  const Rf = p.rf;
+  const ERP = p.erp;
+  const beta = estimateBeta(data);
+
+  const wacc = Rf + beta * ERP;
+  const terminalGrowth = p.terminalGrowth;
+  const projectionYears = p.projectionYears;
+
+  // 基础 EPS（必须 > 0 才能做 DCF）
+  const currentEPS = validNum(data.eps, 0);
+  const currentROE = data.roe > 0 ? data.roe / 100 : 0;
+
+  // 估算自由现金流
+  const currentFCF = validNum(data.freeCF, validNum(data.netIncome, currentEPS * estimateShares(data)));
+
+  // 确定分阶段增长率
+  const growthPhases = estimateGrowthPhases(data, projectionYears, currentROE);
+
+  // 计算每年折现现金流
+  const projection: DCFResult['projection'] = [];
+  let pvSum = 0;
+  let currentFCFPerYear = currentFCF;
+
+  for (let y = 1; y <= projectionYears; y++) {
+    const phase = getPhaseForYear(growthPhases, y);
+    currentFCFPerYear *= (1 + phase);
+    const discounted = currentFCFPerYear / Math.pow(1 + wacc, y);
+    pvSum += discounted;
+    projection.push({ year: y, fcf: currentFCFPerYear, discountedFCF: discounted });
   }
 
-  useEffect(() => {
-    if (searchQuery.length < 1) {
-      setRemoteResults([]);
-      return;
-    }
-    const timer = setTimeout(() => {
-      const cbName = `jsonp_search_${Date.now()}`;
-      (window as any)[cbName] = (d: any) => {
-        if (d?.QuotationCodeTable?.Data) {
-          const mapped = d.QuotationCodeTable.Data.map((item: any) => {
-            let m: 'A' | 'HK' | 'GLOBAL' = 'A';
-            let mk = item.MarketType;
+  // 终值（Gordon Growth Model）
+  const terminalFCF = currentFCFPerYear * (1 + terminalGrowth);
+  let terminalValue = 0;
+  let discountedTerminalValue = 0;
+  if (wacc > terminalGrowth) {
+    terminalValue = terminalFCF / (wacc - terminalGrowth);
+    discountedTerminalValue = terminalValue / Math.pow(1 + wacc, projectionYears);
+  }
 
-            // Use QuoteID if available (e.g., "0.399997") — already in correct secid format
-            if (item.QuoteID && item.QuoteID.includes('.')) {
-              const parts = item.QuoteID.split('.');
-              mk = parts[0];
-              if (mk === '116') m = 'HK';
-              else if (['105', '106', '107', '100'].includes(mk)) m = 'GLOBAL';
-              else m = 'A';
-            } else {
-              // Fallback: map MarketType
-              if (mk === '116') m = 'HK';
-              else if (['105', '106', '107', '100'].includes(mk)) m = 'GLOBAL';
-              else m = 'A'; // '0', '1', '2' etc. → A-share
-            }
+  const totalValue = pvSum + discountedTerminalValue;
+  const shares = estimateShares(data);
+  const intrinsicValue = shares > 0 ? totalValue / shares : 0;
+  const impliedPE = currentEPS > 0 ? intrinsicValue / currentEPS : 0;
+  const marginOfSafety = data.price > 0 ? ((intrinsicValue - data.price) / data.price) * 100 : 0;
 
-            return {
-              c: item.Code,
-              n: item.Name,
-              m: m,
-              mk: mk,
-              type: item.ClassCode
-            };
-          });
-          setRemoteResults(mapped);
-        }
-        delete (window as any)[cbName];
-        const scriptEl = document.getElementById(cbName);
-        if (scriptEl) document.head.removeChild(scriptEl);
-      };
-      const script = document.createElement('script');
-      script.id = cbName;
-      // type=1 for stocks, type=14 for indices
-      const apiType = searchType === 'stock' ? '1' : '14';
-      script.src = `https://searchapi.eastmoney.com/api/suggest/get?input=${searchQuery}&type=${apiType}&cb=${cbName}`;
-      document.head.appendChild(script);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchQuery, searchType]);
+  // 信心评估
+  const hasRealFCF = data.freeCF > 0 || data.netIncome > 0;
+  const hasHistory = data.history && data.history.years.length >= 3;
+  const hasReasonablePE = data.pe > 0 && data.pe < 200;
+  const hasEPS = currentEPS > 0;
+  const confidence: DCFResult['confidence'] = (hasRealFCF && hasHistory && hasReasonablePE && hasEPS) ? 'high'
+    : (hasEPS && (hasHistory || hasReasonablePE)) ? 'medium' : 'low';
 
-  const addIndex = (idx: any) => {
-    if (indices.find(i => i.c === idx.c)) return;
-    const newIndex = { c: idx.c, n: idx.n, m: idx.m, mk: idx.mk };
-    const newIndices = [...indices, newIndex];
-    setIndices(newIndices);
-    localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-    setSearchQuery('');
-    setRemoteResults([]);
-    setIndexMarket(idx.m);
-    navigate('index_detail', newIndex);
+  return {
+    intrinsicValue,
+    impliedPE,
+    params: {
+      wacc,
+      growthPhases,
+      terminalGrowth,
+      currentEPS,
+      currentFCF,
+      projectionYears,
+    },
+    projection,
+    terminalValue,
+    discountedTerminalValue,
+    marginOfSafety,
+    confidence,
   };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
-        <button
-          onClick={() => handleTypeSwitch('stock')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
-            searchType === 'stock' ? 'tab-pill-active' : 'tab-pill-inactive'
-          }`}
-        >
-          搜索股票
-        </button>
-        <button
-          onClick={() => handleTypeSwitch('index')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
-            searchType === 'index' ? 'tab-pill-active' : 'tab-pill-inactive'
-          }`}
-        >
-          搜索指数
-        </button>
-      </div>
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-        <input
-          autoFocus
-          className="input-field pl-10 pr-4 py-3 rounded-2xl shadow-card"
-          placeholder={searchType === 'stock' ? "搜索公司名称或代码..." : "搜索指数名称或代码..."}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
-
-      <div className="space-y-3">
-        {searchType === 'stock' ? (
-          <>
-            {results.length > 0 ? results.map(c => (
-              <div
-                key={`${c.source}-${c.market}-${c.c}`}
-                onClick={() => { setMarket(c.market || 'A'); navigate('comp', c.c, c.n); }}
-                className="card-interactive p-4"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <div className="text-sm font-bold text-slate-800">{c.ic} {c.n}</div>
-                    <div className="text-[10px] text-slate-400 font-mono">{c.c} · {c.sn}</div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-1">
-                  {[
-                    { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                    { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                    { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                  ].map(m => (
-                    <div key={m.l} className="bg-slate-50 rounded-lg py-1.5 text-center">
-                      <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
-                      <div className="text-xs font-bold text-slate-700">{m.v}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )) : searchQuery.length > 0 ? (
-              <div className="text-center py-10 text-slate-400 text-sm">未找到相关公司</div>
-            ) : (
-              <div className="text-center py-20 text-slate-400 text-sm">输入关键词搜索</div>
-            )}
-            
-            {searchQuery.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <button
-                  onClick={handleAiAddCompany}
-                  disabled={isAddingCompany}
-                  className="w-full bg-brand-50 border border-brand-100 text-brand-600 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50"
-                >
-                  {isAddingCompany ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
-                  {isAddingCompany ? '正在让 AI 识别并添加...' : `找不到？让 AI 自动添加 "${searchQuery}"`}
-                </button>
-                {aiAddError && (
-                  <div className="text-center text-xs text-red-500 font-medium">
-                    {aiAddError}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {remoteResults.length > 0 && remoteResults.map(idx => (
-              <div
-                key={`${idx.m}-${idx.c}`}
-                onClick={() => addIndex(idx)}
-                className="card-interactive p-4 flex justify-between items-center"
-              >
-                <div>
-                  <div className="text-sm font-bold text-slate-800">{idx.n}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '美股'}</div>
-                </div>
-                <div className="text-indigo-600 text-xs font-bold">点击添加</div>
-              </div>
-            ))}
-            {searchQuery.length > 0 && remoteResults.length === 0 && (
-              <div className="mt-4 space-y-2">
-                <button
-                  onClick={handleAiAddIndex}
-                  disabled={isAddingIndex}
-                  className="w-full bg-brand-50 border border-brand-100 text-brand-600 font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-50"
-                >
-                  {isAddingIndex ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
-                  {isAddingIndex ? '正在让 AI 识别并添加...' : `找不到？让 AI 自动添加 "${searchQuery}"`}
-                </button>
-                {aiIndexError && (
-                  <div className="text-center text-xs text-red-500 font-medium">
-                    {aiIndexError}
-                  </div>
-                )}
-              </div>
-            )}
-            {searchQuery.length === 0 && remoteResults.length === 0 && (
-              <div className="text-center py-20 text-slate-400 text-sm">输入关键词搜索指数</div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-interface IndexDetailViewProps {
-  idx: Index;
-  batchData: Record<string, any>;
-  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>;
-  setView: (view: ViewType) => void;
-  toggleFav: (code: string, type: 'stock' | 'index', e?: React.MouseEvent) => void;
-  favIndices: string[];
-  breadcrumbNodes?: React.ReactNode;  // Custom breadcrumb content (e.g. from industry page)
 }
 
-const IndexDetailView = ({ idx, batchData, indexVal, setView, toggleFav, favIndices, breadcrumbNodes }: IndexDetailViewProps) => {
-  const bd = batchData[idx.c];
-  const djIv = indexVal[idx.c];
-  // Merge: prefer indexVal (danjuan/percentile), fallback to batchData for PE/PB/DY
-  const iv = djIv || bd ? {
-    pe: djIv?.pe || (bd?.pe && bd.pe > 0 ? bd.pe : undefined),
-    pb: djIv?.pb || (bd?.pb && bd.pb > 0 ? bd.pb : undefined),
-    dy: djIv?.dy || (bd?.dy && bd.dy > 0 ? bd.dy / 100 : undefined),  // bd.dy is raw % (e.g. 2.87), convert to decimal
-    pePct: djIv?.pePct,
-    pbPct: djIv?.pbPct,
-    source: djIv?.source || (bd?.pe ? 'batch' : undefined),
-  } : undefined;
+/**
+ * 根据 PE、ROE、历史波动连续估算 Beta
+ * 不再用离散档位，而是用连续公式
+ *
+ * 逻辑：
+ * - 高 PE → 高 Beta（市场预期高，波动大）
+ * - 高 ROE → 低 Beta（盈利能力强，相对稳定）
+ * - 两者交叉修正
+ */
+function estimateBeta(data: CompleteStockData): number {
+  const pe = validNum(data.pe, 20);    // 默认 20
+  const roe = validNum(data.roe, 10) / 100;  // 默认 10%
 
-  return (
-    <div className="space-y-4">
-      <div className="breadcrumb">
-        {breadcrumbNodes || (
-          <>
-            <button onClick={() => setView('index_list')} className="breadcrumb-link">指数列表</button>
-            <ChevronRight size={12} />
-            <span>{idx.n}</span>
-          </>
-        )}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (window.confirm(`确定删除 "${idx.n}" 吗？`)) {
-              const newIndices = indices.filter(i => i.c !== idx.c);
-              setIndices(newIndices);
-              localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-              setView('index_list');
-            }
-          }}
-          className="ml-auto p-1 text-slate-300 hover:text-red-500 transition-colors"
-        >
-          <Trash2 size={18} />
-        </button>
-        <button onClick={(e) => toggleFav(idx.c, 'index', e)} className="p-1 text-amber-400">
-          {favIndices.includes(idx.c) ? <Star fill="currentColor" size={20} /> : <Star size={20} />}
-        </button>
-      </div>
+  // PE 贡献：PE 从 5 到 100，Beta 从 0.7 到 1.4
+  const peComponent = 0.7 + 0.7 * clamp((pe - 5) / 95, 0, 1);
 
-      <div className="card-elevated p-5 space-y-6">
-        {/* 标题区 */}
-        <div className="flex justify-between items-start">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-800">{idx.n}</h2>
-              {djIv?.evaType && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                  djIv.evaType === 'low' ? 'bg-emerald-50 text-emerald-600' :
-                  djIv.evaType === 'high' ? 'bg-red-50 text-red-600' :
-                  'bg-amber-50 text-amber-600'
-                }`}>
-                  {djIv.evaType === 'low' ? '低估' : djIv.evaType === 'high' ? '高估' : '适中'}
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-slate-400 font-mono mt-1">{idx.c} · {idx.m === 'A' ? 'A股' : idx.m === 'HK' ? '港股' : '国外'}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-slate-900">{bd?.p || '\u2014'}</div>
-            {bd?.cp && (
-              <div className={`text-sm font-bold ${parseFloat(bd.cp) >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
-              </div>
-            )}
-          </div>
-        </div>
+  // ROE 贡献：ROE 从 0 到 30%，Beta 减少 0 到 0.3
+  const roeDiscount = 0.3 * clamp(roe / 0.30, 0, 1);
 
-        {/* 估值指标 */}
-        <div className="grid grid-cols-3 gap-2">
-          {iv?.pe && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE (TTM)</div>
-              <div className="text-base font-bold text-slate-800">{iv.pe.toFixed(2)}</div>
-            </div>
-          )}
-          {iv?.pb && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB</div>
-              <div className="text-base font-bold text-slate-800">{iv.pb.toFixed(2)}</div>
-            </div>
-          )}
-          {iv?.dy && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">股息率</div>
-              <div className="text-base font-bold text-slate-800">{(iv.dy * 100).toFixed(2)}%</div>
-            </div>
-          )}
-          {iv?.roe && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">ROE</div>
-              <div className="text-base font-bold text-slate-800">{(iv.roe * 100).toFixed(2)}%</div>
-            </div>
-          )}
-          {iv?.peg && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PEG</div>
-              <div className="text-base font-bold text-slate-800">{iv.peg.toFixed(2)}</div>
-            </div>
-          )}
-          {iv?.bondYield && (
-            <div className="bg-slate-50 rounded-xl p-3 text-center">
-              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">国债利率</div>
-              <div className="text-base font-bold text-slate-800">{(iv.bondYield * 100).toFixed(2)}%</div>
-            </div>
-          )}
-        </div>
+  // 历史净利润波动（如果有历史数据）
+  let volatilityAdjust = 0;
+  if (data.history && data.history.netIncomes.length >= 3) {
+    const incomes = data.history.netIncomes.filter(v => v > 0);
+    if (incomes.length >= 2) {
+      const mean = incomes.reduce((a, b) => a + b, 0) / incomes.length;
+      const stdDev = Math.sqrt(incomes.reduce((s, v) => s + (v - mean) ** 2, 0) / incomes.length);
+      const cv = mean > 0 ? stdDev / mean : 0; // 变异系数
+      volatilityAdjust = clamp(cv * 0.5, 0, 0.3); // 波动大 → Beta +0~0.3
+    }
+  }
 
-        {iv?.source === 'computed' && (
-          <div className="text-center text-[10px] text-amber-500 font-medium flex items-center justify-center gap-1">
-            <span>\u26a0\ufe0f</span> PE/PB 为从行业成分股推算，非指数直接数据
-          </div>
-        )}
+  return clamp(peComponent - roeDiscount + volatilityAdjust, 0.5, 2.0);
+}
 
-        {/* 股债利差 */}
-        {iv?.pe && iv.pe > 0 && iv?.bondYield && (
-          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
-            <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mb-2">股债利差 (FED 模型)</div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-indigo-600">
-                {((1 / iv.pe - iv.bondYield) * 100).toFixed(2)}%
-              </span>
-              <span className="text-xs text-indigo-400">
-                = 1/PE({(100 / iv.pe).toFixed(2)}%) &minus; 国债({(iv.bondYield * 100).toFixed(2)}%)
-              </span>
-            </div>
-            <div className={`mt-2 text-xs font-bold ${
-              (1 / iv.pe - iv.bondYield) > 0.02 ? 'text-emerald-600' :
-              (1 / iv.pe - iv.bondYield) < -0.02 ? 'text-red-600' :
-              'text-amber-600'
-            }`}>
-              {(1 / iv.pe - iv.bondYield) > 0.02 ? '股票更有吸引力' :
-               (1 / iv.pe - iv.bondYield) < -0.02 ? '债券更有吸引力' :
-               '股债均衡'}
-            </div>
-          </div>
-        )}
+/**
+ * 连续估算分阶段增长率
+ * 不再用固定默认值，而是基于可获取的数据连续计算
+ */
+function estimateGrowthPhases(data: CompleteStockData, totalYears: number, roe: number): Array<{ years: number; growth: number }> {
+  // ── 多维度增长率估算 ──
+  const growthEstimates: number[] = [];
+  const weights: number[] = [];
 
-        {/* 价值估计 */}
-        {bd?.pe && bd?.pe > 0 && (
-          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
-            <div>
-              <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">价值估计 (基于历史均值)</div>
-              <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                {bd?.p && bd?.pe ? `\u00a5${(parseFloat(bd.p) * (15 / bd.pe)).toFixed(2)}` : '\u2014'}
-                <span className="text-xs font-medium ml-1 opacity-70">合理 PE 15.0x</span>
-              </div>
-            </div>
-            <div className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm ${bd.pe < 12 ? 'bg-emerald-50 text-emerald-600' : bd.pe < 18 ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
-              {bd.pe < 12 ? '低估' : bd.pe < 18 ? '合理' : '高估'}
-            </div>
-          </div>
-        )}
-
-        {/* PE/PB 百分位 */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE 百分位 (近10年)</div>
-            <div className="text-2xl font-bold text-slate-800">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}` : '\u2014'}%</div>
-          </div>
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB 百分位 (近10年)</div>
-            <div className="text-2xl font-bold text-slate-800">{iv?.pbPct !== undefined ? `${(iv.pbPct * 100).toFixed(1)}` : '\u2014'}%</div>
-          </div>
-        </div>
-
-        {/* 整体估值水平 */}
-        <div className={`rounded-2xl p-6 text-center ${
-          ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? 'bg-emerald-50 border border-emerald-100' : 
-          ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? 'bg-red-50 border border-red-100' : 
-          'bg-amber-50 border border-amber-100'
-        }`}>
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">整体估值水平</div>
-          <div className={`text-3xl font-black ${
-            ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? 'text-emerald-600' : 
-            ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? 'text-red-600' : 
-            'text-amber-600'
-          }`}>
-            {((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) < 30 ? '低估' : ((iv?.pePct !== undefined ? iv.pePct * 100 : undefined) || 50) > 70 ? '高估' : '适中'}
-          </div>
-          <div className="text-xs text-slate-500 mt-2">
-            基于 PE 百分位：{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(1)}%` : '暂无数据'}
-          </div>
-        </div>
-
-        {/* 估值分析 */}
-        <div className="p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-2xl text-xs text-slate-600 leading-relaxed">
-          <div className="font-bold text-indigo-600 mb-1">估值分析</div>
-          <p>
-            当前指数 PE 为 {iv?.pe ? iv.pe.toFixed(2) : '\u2014'}，PB 为 {iv?.pb ? iv.pb.toFixed(2) : '\u2014'}
-            {iv?.roe ? `，ROE 为 ${(iv.roe * 100).toFixed(2)}%` : ''}
-            {iv?.peg ? `，PEG 为 ${iv.peg.toFixed(2)}` : ''}。
-            {iv?.pe && iv.pe < 15 ? '当前估值处于较低水平，具备较好的投资性价比。' : 
-             iv?.pe && iv.pe > 30 ? '当前估值处于较高水平，需警惕回调风险。' : 
-             '当前估值处于合理区间。'}
-            {iv?.peg && iv.peg > 0 && iv.peg < 1 ? ' PEG<1，盈利增速快于估值，值得关注。' : ''}
-          </p>
-        </div>
-
-        {/* 历史均值对比 */}
-        {(djIv?.peOverHistory !== undefined || djIv?.pbOverHistory !== undefined) && (
-          <div className="grid grid-cols-2 gap-4">
-            {djIv?.peOverHistory !== undefined && (
-              <div className="bg-slate-50 rounded-2xl p-4">
-                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PE / 历史均值</div>
-                <div className={`text-2xl font-bold ${djIv.peOverHistory < 0.8 ? 'text-emerald-600' : djIv.peOverHistory > 1.2 ? 'text-red-600' : 'text-amber-600'}`}>
-                  {(djIv.peOverHistory * 100).toFixed(1)}%
-                </div>
-              </div>
-            )}
-            {djIv?.pbOverHistory !== undefined && (
-              <div className="bg-slate-50 rounded-2xl p-4">
-                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">PB / 历史均值</div>
-                <div className={`text-2xl font-bold ${djIv.pbOverHistory < 0.8 ? 'text-emerald-600' : djIv.pbOverHistory > 1.2 ? 'text-red-600' : 'text-amber-600'}`}>
-                  {(djIv.pbOverHistory * 100).toFixed(1)}%
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 数据来源 */}
-        {djIv?.date && (
-          <div className="text-center text-[10px] text-slate-400 font-medium">
-            数据更新于 {djIv.date} · 来源：蛋卷基金
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default function App() {
-  const [view, setView] = useState<ViewType>('home');
-  const [market, setMarket] = useState<'A' | 'HK'>('A');
-  const [indexMarket, setIndexMarket] = useState<'A' | 'HK' | 'GLOBAL'>('A');
-  const [indexValFilter, setIndexValFilter] = useState<'all' | 'low' | 'mid' | 'high'>('all');
-  const [indices, setIndices] = useState<Index[]>(() => {
-    const saved = localStorage.getItem('iv_indices');
-    return saved ? JSON.parse(saved) : DEFAULT_INDICES;
-  });
-  const [navStack, setNavStack] = useState<NavigationState[]>([]);
-  const [navArgs, setNavArgs] = useState<any[]>([]);
-  const [favStocks, setFavStocks] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_fav_stocks') || '[]'));
-  const [favIndices, setFavIndices] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_fav_indices') || '[]'));
-  const [config, setConfig] = useState<AIConfig>(() => JSON.parse(localStorage.getItem('iv_cfg') || JSON.stringify(DEFAULT_CONFIG)));
-  const [filter, setFilter] = useState<'all' | 'low' | 'mid' | 'high'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  // AI 对话管理
-  interface ChatMessage { role: string; content: string; }
-  interface ChatConversation { id: string; title: string; messages: ChatMessage[]; createdAt: number; }
-  const [aiConversations, setAiConversations] = useState<ChatConversation[]>(() => {
-    const saved = localStorage.getItem('iv_ai_convs');
-    if (saved) return JSON.parse(saved);
-    // 迁移旧数据
-    const old = sessionStorage.getItem('ai_msgs');
-    if (old) {
-      const msgs = JSON.parse(old);
-      if (msgs.length > 0) {
-        const conv = { id: 'legacy', title: '历史对话', messages: msgs, createdAt: Date.now() };
-        localStorage.setItem('iv_ai_convs', JSON.stringify([conv]));
-        sessionStorage.removeItem('ai_msgs');
-        return [conv];
+  // 维度1：历史净利润 CAGR（权重最高）
+  if (data.history && data.history.netIncomes.length >= 2) {
+    const incomes = data.history.netIncomes;
+    const latest = incomes[0];
+    const oldest = incomes[incomes.length - 1];
+    if (oldest > 0 && latest > 0 && incomes.length >= 2) {
+      const cagr = Math.pow(latest / oldest, 1 / (incomes.length - 1)) - 1;
+      if (cagr > -0.5 && cagr < 1.5) {
+        growthEstimates.push(cagr);
+        weights.push(3.0);
       }
     }
-    return [];
-  });
-  const [activeAiConvId, setActiveAiConvId] = useState<string | null>(() => aiConversations.length > 0 ? aiConversations[0].id : null);
-  const [showAiConvList, setShowAiConvList] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  // 估值模型参数（从 localStorage 恢复，默认中性方案）
-  const [valuationConfig, setValuationConfig] = useState<ValuationConfig>(() => {
-    const saved = localStorage.getItem('iv_val_cfg');
-    if (saved) {
-      try { return JSON.parse(saved); } catch {}
+  }
+
+  // 维度2：最近一年净利润同比增长
+  if (data.netIncomeGrowth && data.netIncomeGrowth !== 0) {
+    const g = data.netIncomeGrowth / 100;
+    if (g > -0.8 && g < 2) {
+      growthEstimates.push(g);
+      weights.push(1.5);
     }
-    return VALUATION_PRESETS.neutral.config;
-  });
-  // 当前选中的预设方案（null = 自定义）
-  const [activePreset, setActivePreset] = useState<PresetName | null>(() => {
-    return localStorage.getItem('iv_val_preset') as PresetName || 'neutral';
-  });
-  const [settingsTab, setSettingsTab] = useState<'ai' | 'data' | 'valuation'>('ai');
-  const [livePrice, setLivePrice] = useState<{ 
-    p: string; ch: string; cp: string; up: boolean;
-    pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string; fcap?: string;
-  } | null>(null);
-  const [customCompanies, setCustomCompanies] = useState<any[]>(() => JSON.parse(localStorage.getItem('iv_custom_comps') || '[]'));
-  const [deletedCompanies, setDeletedCompanies] = useState<string[]>(() => JSON.parse(localStorage.getItem('iv_deleted_comps') || '[]'));
-  const [isAddingCompany, setIsAddingCompany] = useState(false);
-  const [aiAddError, setAiAddError] = useState<string | null>(null);
-  const [isAddingIndex, setIsAddingIndex] = useState(false);
-  const [aiIndexError, setAiIndexError] = useState<string | null>(null);
-  const [batchData, setBatchData] = useState<Record<string, {
-    pe?: number; pb?: number; dy?: number; ps?: number; roe?: number; eps?: number;
-    mcap?: number; fcap?: number;
-    p?: string; cp?: string;
-    roa?: number; grossMargin?: number; netMargin?: number; debt?: number;
-    revenueGrowth?: number; netIncomeGrowth?: number;
-    dividendPerShare?: number; payoutYears?: number;
-    pePct?: number; pbPct?: number;
-    revenue?: number; netIncome?: number;
-  }>>({});
-  const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string }>>({});
-  // 实时股票详情数据（用于增强估值模型）
-  const [stockDetailData, setStockDetailData] = useState<Record<string, CompleteStockData>>({});
-  const [stockDetailLoading, setStockDetailLoading] = useState<Record<string, boolean>>({});
-  const [valuationResults, setValuationResults] = useState<Record<string, ValuationSummary>>({});
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('iv_dark');
-    if (saved !== null) return saved === 'true';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
+  }
 
-  // 初始化 & 切换暗色模式
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-    localStorage.setItem('iv_dark', String(darkMode));
-  }, [darkMode]);
-
-  // 导航状态 ref（供返回键监听使用，避免闭包陈旧）
-  const navStackRef = useRef<NavigationState[]>([]);
-  const navArgsRef = useRef<any[]>([]);
-  const viewRef = useRef<ViewType>(view);
-  const showSettingsRef = useRef(false); // kept for back button compat
-
-  // 同步 state → ref
-  useEffect(() => { navStackRef.current = navStack; }, [navStack]);
-  useEffect(() => { navArgsRef.current = navArgs; }, [navArgs]);
-  useEffect(() => { viewRef.current = view; }, [view]);
-
-  // 状态栏：不覆盖 WebView，根据主题适配
-  useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      const timer = setTimeout(() => {
-        StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-        StatusBar.setBackgroundColor({ color: darkMode ? '#0f172a' : '#ffffff' }).catch(() => {});
-        StatusBar.setStyle({ style: darkMode ? Style.Light : Style.Dark }).catch(() => {});
-      }, 200);
-      return () => clearTimeout(timer);
+  // 维度3：最近一年营收同比增长
+  if (data.revenueGrowth && data.revenueGrowth !== 0) {
+    const g = data.revenueGrowth / 100;
+    if (g > -0.8 && g < 2) {
+      growthEstimates.push(g * 0.8); // 营收增长打 8 折作为利润增长近似
+      weights.push(1.0);
     }
-  }, [darkMode]);
+  }
 
-  // Android 返回键监听 —— 完全基于 ref，无闭包陈旧问题
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    const listener = CapApp.addListener('backButton', () => {
-      // 1. 有导航栈 → 返回上一页
-      const stack = navStackRef.current;
-      if (stack.length > 0) {
-        const prev = stack[stack.length - 1];
-        setNavStack(s => s.slice(0, -1));
-        setView(prev.view);
-        setNavArgs(prev.args);
-        window.scrollTo(0, 0);
-        return;
-      }
-      // 3. 在首页 → 最小化
-      if (viewRef.current === 'home') {
-        CapApp.minimizeApp();
-        return;
-      }
-      // 4. 其他页面 → 回到首页
-      setView('home');
-      setNavStack([]);
-      setNavArgs([]);
-    });
-    return () => { listener.then(l => l.remove()); };
-  }, []);
-
-  // Capacitor 环境下直接访问真实 API（无 CORS 限制），Web 环境走代理
-  const djApiBase = Capacitor.isNativePlatform() ? 'https://danjuanfunds.com' : '';
-  const sinaApiBase = Capacitor.isNativePlatform() ? 'https://vip.stock.finance.sina.com.cn' : '/sina-api';
-
-  const getMergedIndustries = (base: Industry[], mkt: 'A' | 'HK' | 'GLOBAL') => {
-    const merged = JSON.parse(JSON.stringify(base)) as Industry[];
-    
-    merged.forEach(ind => {
-      ind.l2.forEach(sub => {
-        sub.cs = sub.cs.filter(c => !deletedCompanies.includes(c.c));
-      });
-      ind.l2 = ind.l2.filter(sub => sub.cs.length > 0);
-    });
-    const filteredMerged = merged.filter(ind => ind.l2.length > 0);
-
-    const marketCustom = customCompanies.filter(c => c.market === mkt && !deletedCompanies.includes(c.c));
-    
-    marketCustom.forEach(cc => {
-      let ind = filteredMerged.find(i => i.nm === (cc.indName || '其他行业'));
-      if (!ind) {
-        ind = { id: `custom_${Date.now()}_${Math.random()}`, nm: cc.indName || '其他行业', ic: cc.ic || '🏢', ev: 'mid', l2: [] };
-        filteredMerged.push(ind);
-      }
-      let sub = ind.l2.find(s => s.nm === (cc.subIndName || '其他细分'));
-      if (!sub) {
-        sub = { nm: cc.subIndName || '其他细分', cs: [] };
-        ind.l2.push(sub);
-      }
-      if (!sub.cs.find(x => x.c === cc.c)) {
-        sub.cs.push({
-          c: cc.c, n: cc.n, market: cc.market
-        });
-      }
-    });
-    return filteredMerged;
-  };
-
-  const mergedA = getMergedIndustries(INDUSTRIES, 'A');
-  const mergedHK = getMergedIndustries(HK_INDUSTRIES, 'HK');
-  const mergedGlobal = getMergedIndustries([], 'GLOBAL');
-  const currentIndustries = market === 'A' ? mergedA : (market === 'HK' ? mergedHK : mergedGlobal);
-  const allIndustries = [...mergedA, ...mergedHK, ...mergedGlobal];
-
-  const allCodesStr = JSON.stringify([
-    ...allIndustries.flatMap(ind => ind.l2.flatMap(sub => sub.cs.map(c => c.c))),
-    ...allIndustries.filter(ind => ind.bk).map(ind => ind.bk),
-    ...allIndustries.flatMap(ind => (ind.indices || []).map(idx => idx.c)),
-    ...indices.map(idx => idx.c)
-  ]);
-
-  useEffect(() => {
-    const fetchBatch = () => {
-      const allCodes = allIndustries.flatMap(ind => ind.l2.flatMap(sub => sub.cs));
-      const bkCodes = allIndustries.filter(ind => ind.bk).map(ind => ({ c: ind.bk, market: 'BK' }));
-      const indCodes = allIndustries.flatMap(ind => (ind.indices || []).map(idx => ({ c: idx.c, market: 'IDX' })));
-      const userIndices = indices.map(idx => ({ c: idx.c, market: idx.m === 'A' ? 'IDX' : idx.m }));
-      const combined = [...allCodes, ...bkCodes, ...indCodes, ...userIndices];
-      if (combined.length === 0) return;
-      
-      const secidsList = combined.map(c => {
-        if (c.market === 'BK') return `90.${c.c}`;
-        if (c.market === 'IDX') {
-          // Use stored mk if available for precise market identification
-          // Fallback: 000xxx/001xxx/930xxx/931xxx → SH (1), 399xxx → SZ (0)
-          const idx = indices.find(i => i.c === c.c);
-          if (idx?.mk) return `${idx.mk}.${c.c}`;
-          const realMk = (c.c.startsWith('399') || c.c.startsWith('159')) ? '0' : '1';
-          return `${realMk}.${c.c}`;
-        }
-        if (c.market === 'HK') {
-          if (['HSI', 'HSCEI', 'HSTECH'].includes(c.c)) return `100.${c.c}`;
-          return `116.${c.c}`;
-        }
-        if (c.market === 'GLOBAL') {
-          // Use stored mk if available
-          const idx = indices.find(i => i.c === c.c);
-          if (idx?.mk) return `${idx.mk}.${c.c}`;
-          // Fallback hardcoded mappings
-          if (c.c === 'DJI') return '100.UDI';
-          if (c.c === 'IXIC') return '100.IXIC';
-          if (c.c === 'INX') return '100.SPX';
-          if (c.c === 'N225') return '100.N225';
-          if (c.c === 'KS11') return '100.KOSPI';
-          if (c.c === 'FTSE') return '100.FTSE';
-          if (c.c === 'GDAXI') return '100.GDAXI';
-          if (c.c === 'FCHI') return '100.FCHI';
-          if (c.c === 'NSEI') return '100.NIFTY';
-          if (c.c === 'BVSP') return '100.BVSP';
-          return `105.${c.c}`;
-        }
-        const mk = c.market === 'HK' ? '116' : (c.c.startsWith('6') ? '1' : '0');
-        return `${mk}.${c.c}`;
-      });
-
-      const chunkSize = 100;
-      for (let i = 0; i < secidsList.length; i += chunkSize) {
-        const chunk = secidsList.slice(i, i + chunkSize).join(',');
-        const cbName = `jsonp_batch_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        
-        const timeoutId = setTimeout(() => {
-          console.warn(`[Batch] JSONP timeout for chunk ${i/chunkSize}`);
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-        }, 15000);
-        
-        (window as any)[cbName] = (d: any) => {
-          clearTimeout(timeoutId);
-          if (d?.data?.diff) {
-            setBatchData(prev => {
-              const newData = { ...prev };
-              d.data.diff.forEach((item: any) => {
-                let code = item.f12;
-                if (code === 'UDI') code = 'DJI';
-                if (code === 'SPX') code = 'INX';
-                if (code === 'KOSPI') code = 'KS11';
-                if (code === 'NIFTY') code = 'NSEI';
-
-                const mkId = item.f13;
-                const pScale = mkId === 116 ? 1000 : 100;
-                const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
-                const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
-
-                newData[code] = {
-                  // 基础行情
-                  p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
-                  cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                  // 估值指标
-                  pe: valPos(item.f162, 100) || valPos(item.f9, 100),
-                  pb: valPos(item.f167, 100) || valPos(item.f23, 100),
-                  dy: valPos(item.f177, 100),
-                  ps: valPos(item.f188, 100),
-                  roe: val(item.f183, 100) || val(item.f37),
-                  roa: val(item.f184, 100),
-                  eps: valPos(item.f168, 100),
-                  // 市值（f20=总市值）
-                  mcap: valPos(item.f20, 100000000) || valPos(item.f57, 100000000),
-                  fcap: valPos(item.f117, 100000000),
-                  // 盈利质量
-                  grossMargin: val(item.f185, 100),
-                  netMargin: val(item.f186, 100),
-                  debt: val(item.f52, 100),
-                  // 增长率
-                  revenueGrowth: val(item.f98, 100),
-                  netIncomeGrowth: val(item.f99, 100),
-                  // 分红
-                  dividendPerShare: val(item.f69),
-                  payoutYears: val(item.f100),
-                  // 百分位
-                  pePct: val(item.f137, 100),
-                  pbPct: val(item.f138, 100),
-                };
-              });
-              return newData;
-            });
-          }
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-        };
-        
-        const script = document.createElement('script');
-        script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138&cb=${cbName}`;
-        script.onerror = () => {
-          clearTimeout(timeoutId);
-          console.warn(`[Batch] JSONP error, trying fetch fallback for chunk ${i/chunkSize}`);
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-          // Fallback: try fetch() (works on Capacitor native, may fail on web due to CORS)
-          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138`)
-            .then(r => r.json())
-            .then((d: any) => {
-              if (d?.data?.diff) {
-                setBatchData(prev => {
-                  const newData = { ...prev };
-                  d.data.diff.forEach((item: any) => {
-                    let code = item.f12;
-                    if (code === 'UDI') code = 'DJI';
-                    if (code === 'SPX') code = 'INX';
-                    if (code === 'KOSPI') code = 'KS11';
-                    if (code === 'NIFTY') code = 'NSEI';
-                    const mkId = item.f13;
-                    const pScale = mkId === 116 ? 1000 : 100;
-                    const pe = item.f162 !== '-' && item.f162 !== undefined && item.f162 > 0 ? item.f162 / 100 : (item.f9 !== '-' && item.f9 !== undefined && item.f9 > 0 ? item.f9 / 100 : undefined);
-                    const pb = item.f167 !== '-' && item.f167 !== undefined && item.f167 > 0 ? item.f167 / 100 : (item.f23 !== '-' && item.f23 !== undefined && item.f23 > 0 ? item.f23 / 100 : undefined);
-                    const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
-                    const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
-                    const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
-                    const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
-                    const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 : undefined;
-                    const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
-                    const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
-                    newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
-                  });
-                  return newData;
-                });
-              }
-            })
-            .catch(() => {});
-        };
-        document.head.appendChild(script);
-      }
-    };
-
-    fetchBatch();
-    const timer = setInterval(fetchBatch, 10000);
-    return () => clearInterval(timer);
-  }, [allCodesStr]);
-
-  // ─── 实时股票详情数据获取 ───
-  // 当用户进入公司详情页时，异步获取实时财务数据并计算增强估值
-  useEffect(() => {
-    if (view !== 'comp' || !navArgs[0]) return;
-    const code = String(navArgs[0]).trim();
-    if (!code || stockDetailLoading[code]) return;
-    // 如果已经有数据且不超时，跳过
-    if (stockDetailData[code] && (Date.now() - stockDetailData[code].fetchedAt) < 60000) return;
-
-    const doFetch = async () => {
-      setStockDetailLoading(prev => ({ ...prev, [code]: true }));
-      try {
-        // 找到公司所在行业以确定市场
-        let market: 'A' | 'HK' | 'GLOBAL' = 'A';
-        let staticFallback: any = undefined;
-        for (const ind of allIndustries) {
-          for (const sub of ind.l2) {
-            const found = sub.cs.find(c => c.c === code);
-            if (found) {
-              market = ind.market || 'A';
-              staticFallback = { pe: found.pe, pb: found.pb, roe: found.roe, dy: found.dy, ps: found.ps, n: found.n };
-              break;
-            }
-          }
-        }
-        // 也检查 custom companies
-        const customComp = customCompanies.find(c => c.c === code);
-        if (customComp && !staticFallback) {
-          market = customComp.market || 'A';
-          staticFallback = { pe: customComp.pe, pb: customComp.pb, roe: customComp.roe, dy: customComp.dy, ps: customComp.ps, n: customComp.n };
-        }
-
-        const data = await fetchStockDataCached(code, market, staticFallback);
-        // 用 batchData 中的实时数据补全
-        const bd = batchData[code];
-        if (bd) {
-          if (bd.revenueGrowth !== undefined && data.revenueGrowth === 0) data.revenueGrowth = bd.revenueGrowth;
-          if (bd.netIncomeGrowth !== undefined && data.netIncomeGrowth === 0) data.netIncomeGrowth = bd.netIncomeGrowth;
-          if (bd.dividendPerShare !== undefined) data.dividendPerShare = bd.dividendPerShare;
-          if (bd.eps !== undefined && data.eps === 0) data.eps = bd.eps;
-          if (bd.roa !== undefined && data.roa === 0) data.roa = bd.roa;
-          if (bd.grossMargin !== undefined && data.grossMargin === 0) data.grossMargin = bd.grossMargin;
-          if (bd.netMargin !== undefined && data.netMargin === 0) data.netMargin = bd.netMargin;
-          if (bd.debt !== undefined && data.totalDebt === 0) data.totalDebt = bd.debt;
-          if (bd.mcap !== undefined && data.mcap === 0) data.mcap = bd.mcap;
-        }
-        setStockDetailData(prev => ({ ...prev, [code]: data }));
-
-        // 计算增强估值
-        // 找行业 PE（从 batchData 计算行业平均）
-        let industryPE = 20;
-        for (const ind of allIndustries) {
-          for (const sub of ind.l2) {
-            if (sub.cs.find(c => c.c === code)) {
-              // 从该行业成分股的 batchData 计算平均 PE
-              const peValues = sub.cs
-                .map(c => batchData[c.c]?.pe)
-                .filter((v): v is number => v !== undefined && v > 0 && v < 500);
-              industryPE = peValues.length > 0 ? peValues.reduce((a, b) => a + b, 0) / peValues.length : 20;
-              break;
-            }
-          }
-        }
-        if (data.pe > 0 && data.eps > 0) {
-          const valuation = calculateValuationSummary(data, industryPE, valuationConfig);
-          setValuationResults(prev => ({ ...prev, [code]: valuation }));
-        }
-      } catch (e) {
-        console.error('[StockDetail] Fetch error:', e);
-      } finally {
-        setStockDetailLoading(prev => ({ ...prev, [code]: false }));
-      }
-    };
-    doFetch();
-  }, [view, navArgs[0], allIndustries, customCompanies]);
-
-  // Fetch index valuation from danjuanfunds.com + eastmoney as fallback
-  const allIndexCodes = indices.map(i => i.c).join(',');
-  useEffect(() => {
-    if (indices.length === 0) return;
-    
-    const fetchIndexValuation = async () => {
-      const matchedCodes = new Set<string>();
-      const applyData = (djItems: any[]) => {
-        const newVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number }> = {};
-        for (const idx of indices) {
-          const match = djItems.find((item: any) => {
-            const djCode = (item.index_code || '').replace(/^(SH|SZ|HK|CSI)/, '');
-            return djCode === idx.c || item.index_code === idx.c;
-          });
-          if (match) {
-            matchedCodes.add(idx.c);
-            newVal[idx.c] = {
-              pe: match.pe > 0 ? match.pe : undefined,
-              pb: match.pb > 0 ? match.pb : undefined,
-              dy: (match.yeild || match.dy) > 0 ? (match.yeild || match.dy) : undefined,
-              pePct: (match.pe_percentile || match.pePct) > 0 ? (match.pe_percentile || match.pePct) : undefined,
-              pbPct: (match.pb_percentile || match.pbPct) > 0 ? (match.pb_percentile || match.pbPct) : undefined,
-              roe: match.roe > 0 ? match.roe : undefined,
-              peg: match.peg > 0 ? match.peg : undefined,
-              evaType: match.eva_type || undefined,
-              bondYield: match.bond_yeild > 0 ? match.bond_yeild : undefined,
-              peOverHistory: match.pe_over_history > 0 ? match.pe_over_history : undefined,
-              pbOverHistory: match.pb_over_history > 0 ? match.pb_over_history : undefined,
-              evaTypeInt: match.eva_type_int !== undefined ? match.eva_type_int : undefined,
-              date: match.date || undefined,
-            };
-          }
-        }
-        setIndexVal(prev => ({ ...prev, ...newVal }));
-      };
-
-      try {
-        let djData: any;
-        if (Capacitor.isNativePlatform()) {
-          const resp = await CapacitorHttp.get({ url: `${djApiBase}/djapi/index_eva/dj` });
-          djData = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
-        } else {
-          const resp = await fetch(`${djApiBase}/djapi/index_eva/dj`);
-          djData = await resp.json();
-        }
-        if (djData?.data?.items?.length > 0) {
-          applyData(djData.data.items);
-        }
-      } catch (e) {
-        console.warn('[IndexVal] Danjuan API failed:', e);
-      }
-
-      // Supplementary: fetch PE/PB for indices not matched by danjuan via eastmoney stock API
-      const missingIndices = indices.filter(idx => !matchedCodes.has(idx.c));
-      for (const idx of missingIndices) {
-        if (!idx.mk || idx.m === 'GLOBAL') continue;
-        const cbName = `jsonp_idxval_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        const timeoutId = setTimeout(() => {
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        }, 8000);
-        
-        (window as any)[cbName] = (d: any) => {
-          clearTimeout(timeoutId);
-          if (d?.data) {
-            const pe = d.data.f162 !== '-' && d.data.f162 > 0 ? d.data.f162 / 100 : 
-                       (d.data.f9 !== '-' && d.data.f9 > 0 ? d.data.f9 / 100 : undefined);
-            const pb = d.data.f167 !== '-' && d.data.f167 > 0 ? d.data.f167 / 100 :
-                       (d.data.f23 !== '-' && d.data.f23 > 0 ? d.data.f23 / 100 : undefined);
-            const dy = d.data.f173 !== '-' && d.data.f173 > 0 ? d.data.f173 / 100 : undefined;
-            if (pe || pb) {
-              setIndexVal(prev => ({
-                ...prev,
-                [idx.c]: { pe, pb, dy }
-              }));
-            }
-          }
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        };
-        
-        const script = document.createElement('script');
-        script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${idx.mk}.${idx.c}&fields=f9,f23,f162,f167,f173&cb=${cbName}`;
-        script.onerror = () => {
-          clearTimeout(timeoutId);
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        };
-        document.head.appendChild(script);
-      }
-    };
-    
-    fetchIndexValuation();
-    const timer = setInterval(fetchIndexValuation, 60000);
-    return () => clearInterval(timer);
-  }, [allIndexCodes]);
-
-  // Fallback: compute index PE/PB from constituent stocks via Sina API
-  useEffect(() => {
-    const fetchAndCompute = async () => {
-      for (const idx of indices) {
-        // Skip if already have data from DJ or eastmoney
-        const iv = indexVal[idx.c];
-        if (iv?.pe && iv.pe > 0) continue;
-        // Skip non-A-share indices (Sina only covers A-share)
-        if (idx.m !== 'A') continue;
-
-        try {
-          // 1. Fetch constituent stocks from Sina
-          const resp = await fetch(`${sinaApiBase}/corp/go.php/vII_NewestComponent/indexid/${idx.c}.phtml`);
-          const buf = await resp.arrayBuffer();
-          const html = new TextDecoder('gbk').decode(buf);
-          const codeMatches = [...html.matchAll(/<div align="center">(\d{6})<\/div>/g)];
-          const codes = [...new Set(codeMatches.map(m => m[1]))];
-
-          if (codes.length === 0) continue;
-
-          // 2. Batch fetch PE/PB for constituents from eastmoney
-          const secids = codes.map(c => `${c.startsWith('6') ? '1' : '0'}.${c}`).join(',');
-          const batchResp = await fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=f12,f2,f9,f23,f116,f162,f167,f173`);
-          const batchData = await batchResp.json();
-
-          if (!batchData?.data?.diff) continue;
-
-          // 3. Compute weighted PE/PB
-          let totalPE = 0, totalPB = 0, totalDY = 0;
-          let peW = 0, pbW = 0, dyW = 0;
-          for (const s of batchData.data.diff) {
-            const pe = (s.f162 > 0 ? s.f162 / 100 : (s.f9 > 0 ? s.f9 / 100 : 0));
-            const pb = (s.f167 > 0 ? s.f167 / 100 : (s.f23 > 0 ? s.f23 / 100 : 0));
-            const dy = s.f173 > 0 ? s.f173 / 100 : 0;
-            const mcap = s.f116 > 0 ? s.f116 : 1;
-            if (pe > 0) { totalPE += pe * mcap; peW += mcap; }
-            if (pb > 0) { totalPB += pb * mcap; pbW += mcap; }
-            if (dy > 0) { totalDY += dy * mcap; dyW += mcap; }
-          }
-
-          const avgPE = peW > 0 ? totalPE / peW : undefined;
-          const avgPB = pbW > 0 ? totalPB / pbW : undefined;
-          const avgDY = dyW > 0 ? totalDY / dyW : undefined;
-
-          if (avgPE || avgPB) {
-            setIndexVal(prev => ({
-              ...prev,
-              [idx.c]: { pe: avgPE, pb: avgPB, dy: avgDY, source: 'computed' }
-            }));
-          }
-        } catch (e) {
-          // Sina API may fail (CORS, network, etc.) — silently skip
-        }
-      }
-    };
-
-    // Run after a delay to let DJ/eastmoney results arrive first
-    const timer = setTimeout(fetchAndCompute, 5000);
-    return () => clearTimeout(timer);
-  }, [allIndexCodes]);
-
-  // 专用指数 PE/PB/DY 获取：逐个 JSONP 请求 eastmoney 单品种接口
-  // 批量 API (ulist.np) 对指数可能不返回估值字段，此效果确保指数估值数据可靠获取
-  useEffect(() => {
-    if (indices.length === 0) return;
-
-    const fetchAllIndexVal = () => {
-      indices.forEach((idx, i) => {
-        if (!idx.mk || idx.m === 'GLOBAL') return;
-
-        const cbName = `jsonp_ixval_${Date.now()}_${i}_${Math.floor(Math.random() * 10000)}`;
-        const timeoutId = setTimeout(() => {
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        }, 8000);
-
-        (window as any)[cbName] = (d: any) => {
-          clearTimeout(timeoutId);
-          if (d?.data) {
-            const pe = d.data.f162 !== undefined && d.data.f162 !== '-' && d.data.f162 > 0 ? d.data.f162 / 100 :
-                       d.data.f9 !== undefined && d.data.f9 !== '-' && d.data.f9 > 0 ? d.data.f9 / 100 : undefined;
-            const pb = d.data.f167 !== undefined && d.data.f167 !== '-' && d.data.f167 > 0 ? d.data.f167 / 100 :
-                       d.data.f23 !== undefined && d.data.f23 !== '-' && d.data.f23 > 0 ? d.data.f23 / 100 : undefined;
-            const dy = d.data.f173 !== undefined && d.data.f173 !== '-' && d.data.f173 > 0 ? d.data.f173 / 100 : undefined;
-            if (pe || pb) {
-              setIndexVal(prev => {
-                const existing = prev[idx.c];
-                // 仅在无数据或数据更优时更新
-                if (!existing?.pe && !existing?.pb) {
-                  return { ...prev, [idx.c]: { pe, pb, dy } };
-                }
-                return prev;
-              });
-            }
-          }
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        };
-
-        const script = document.createElement('script');
-        script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${idx.mk}.${idx.c}&fields=f9,f23,f162,f167,f173&cb=${cbName}`;
-        script.onerror = () => {
-          clearTimeout(timeoutId);
-          delete (window as any)[cbName];
-          const el = document.getElementById(cbName);
-          if (el) el.remove();
-        };
-        document.head.appendChild(script);
-      });
-    };
-
-    // 首次立即执行 + 每 60 秒刷新
-    fetchAllIndexVal();
-    const timer = setInterval(fetchAllIndexVal, 60000);
-    return () => clearInterval(timer);
-  }, [allIndexCodes]);
-
-  useEffect(() => {
-    localStorage.setItem('iv_fav_stocks', JSON.stringify(favStocks));
-    localStorage.setItem('iv_fav_indices', JSON.stringify(favIndices));
-  }, [favStocks, favIndices]);
-
-  useEffect(() => {
-    localStorage.setItem('iv_cfg', JSON.stringify(config));
-  }, [config]);
-
-  useEffect(() => {
-    localStorage.setItem('iv_ai_convs', JSON.stringify(aiConversations));
-  }, [aiConversations]);
-
-  const navigate = (newView: ViewType, ...args: any[]) => {
-    setNavStack(prev => [...prev, { view, args: navArgs }]);
-    setView(newView);
-    setNavArgs(args);
-    window.scrollTo(0, 0);
-  };
-
-  const goBack = () => {
-    if (navStack.length > 0) {
-      const last = navStack[navStack.length - 1];
-      setNavStack(prev => prev.slice(0, -1));
-      setView(last.view);
-      setNavArgs(last.args);
-    } else {
-      setView('home');
+  // 维度4：ROE × 留存率（可持续增长率 g = ROE × b）
+  if (roe > 0 && roe < 0.5) {
+    // 估算留存率：高分红公司留存率低
+    const payoutEst = data.dy > 3 ? 0.4 : data.dy > 1 ? 0.6 : 0.8;
+    const sustainableGrowth = roe * payoutEst;
+    if (sustainableGrowth > 0 && sustainableGrowth < 0.5) {
+      growthEstimates.push(sustainableGrowth);
+      weights.push(2.0);
     }
-  };
+  }
 
-  const toggleFav = (code: string, type: 'stock' | 'index', e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (type === 'stock') {
-      setFavStocks(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
-    } else {
-      setFavIndices(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
+  // 加权平均
+  let baseGrowth = 0.05; // 仅在完全没有数据时使用
+  if (growthEstimates.length > 0) {
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    baseGrowth = growthEstimates.reduce((sum, g, i) => sum + g * weights[i], 0) / totalWeight;
+  }
+
+  // 用 ROE 作为增长上限约束
+  if (roe > 0 && roe < 0.5) {
+    baseGrowth = Math.min(baseGrowth, roe * 0.8);
+  }
+
+  // 确保在合理范围内
+  baseGrowth = clamp(baseGrowth, 0.01, 0.35);
+
+  // 阶段1：前 half 年较高增长
+  const phase1Years = Math.min(5, Math.floor(totalYears / 2));
+  // 阶段2：收敛到永续增长率
+  const phase2Years = totalYears - phase1Years;
+  const phase2Growth = (baseGrowth + 0.03) / 2;
+
+  return [
+    { years: phase1Years, growth: baseGrowth },
+    { years: phase2Years, growth: phase2Growth },
+  ];
+}
+
+function getPhaseForYear(phases: Array<{ years: number; growth: number }>, year: number): number {
+  let acc = 0;
+  for (const phase of phases) {
+    acc += phase.years;
+    if (year <= acc) return phase.growth;
+  }
+  return phases[phases.length - 1].growth;
+}
+
+/**
+ * 连续估算总股本
+ * 优先用市值/价格推算
+ */
+function estimateShares(data: CompleteStockData): number {
+  if (data.mcap > 0 && data.price > 0) {
+    return (data.mcap * 1e8) / data.price;
+  }
+  if (data.eps > 0 && data.pe > 0 && data.mcap > 0) {
+    const impliedPrice = data.eps * data.pe;
+    if (impliedPrice > 0) {
+      return (data.mcap * 1e8) / impliedPrice;
     }
+  }
+  return 1;
+}
+
+// ─── PE 相对估值模型 ───
+
+/**
+ * PE 相对估值
+ *
+ * 综合三个维度：
+ * 1. 行业平均 PE × ROE 修正（连续函数，非离散）
+ * 2. 历史 PE 中位数
+ * 3. PEG 修正（PE / 增长率）
+ */
+export function calculatePERelative(
+  data: CompleteStockData,
+  industryPE: number,
+  params?: PERelativeParams
+): PERelativeResult {
+  const p = params || VALUATION_PRESETS.neutral.config.pe;
+  const currentROE = data.roe > 0 ? data.roe / 100 : 0;
+  const currentGrowth = data.netIncomeGrowth > 0 ? data.netIncomeGrowth / 100 : 0;
+
+  // ① 行业 PE × ROE 修正（连续函数）
+  // ROE 从 0% 到 30%，修正系数从 0.3 到 2.0
+  const roeAdjustment = currentROE > 0
+    ? clamp(0.3 + 1.7 * (currentROE / 0.30), 0.3, 2.5)
+    : 0.5;
+  const industryFairPE = industryPE * roeAdjustment;
+
+  // ② 历史 PE：用当前 PE 作为历史估值参考
+  let historicalFairPE = industryPE;
+  if (data.pe > 0 && data.pe < 500) {
+    historicalFairPE = data.pe;
+  } else if (data.history && data.history.years.length >= 2) {
+    // 如果有历史数据，用历史 PE 作为参考
+    historicalFairPE = industryPE;
+  }
+
+  // ③ PEG 修正：合理 PE = 增长率 × 100（PEG=1）
+  // 增长率 0% → PE = 行业×0.3；增长率 20% → PE = 20
+  let growthPE: number;
+  if (currentGrowth > 0.02) {
+    growthPE = currentGrowth * 100;
+  } else {
+    growthPE = industryPE * 0.4;
+  }
+
+  // 权重分配
+  const hasHistory = data.history && data.history.years.length >= 3;
+  const hasGrowth = currentGrowth > 0.02;
+  const weights = {
+    industry: p.industryWeight,
+    historical: hasHistory ? p.historicalWeight : p.historicalWeight * 0.5,
+    growth: hasGrowth ? p.growthWeight + (hasHistory ? 0 : p.historicalWeight * 0.5) : p.growthWeight * 0.3,
   };
 
-  const pColor = (v: number) => v < 30 ? 'text-emerald-600' : v < 70 ? 'text-amber-600' : 'text-red-600';
-  const pBg = (v: number) => v < 30 ? 'bg-emerald-600' : v < 70 ? 'bg-amber-600' : 'bg-red-600';
-  const evColor = (e: string) => e === 'low' ? 'bg-emerald-50 text-emerald-600' : e === 'mid' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600';
-  const evText = (e: string) => e === 'low' ? '低估' : e === 'mid' ? '适中' : '高估';
+  // 归一化权重
+  const totalW = weights.industry + weights.historical + weights.growth;
+  if (totalW > 0) {
+    weights.industry /= totalW;
+    weights.historical /= totalW;
+    weights.growth /= totalW;
+  }
 
-  const getGrade = (v: number, ts: number[]) => v >= ts[0] ? 'A+' : v >= ts[1] ? 'A' : v >= ts[2] ? 'B+' : v >= ts[3] ? 'B' : 'C';
-  const gColor = (g: string) => g.includes('A') ? 'text-emerald-600' : g === 'B+' ? 'text-amber-600' : 'text-red-600';
+  // 加权平均
+  const fairPE = industryFairPE * weights.industry
+    + historicalFairPE * weights.historical
+    + growthPE * weights.growth;
 
-  // Live Price Fetching
-  useEffect(() => {
-    if (view === 'comp' && navArgs[0]) {
-      const code = navArgs[0];
-      
-      // Find company to determine market
-      let cMarket = 'A';
-      let foundComp: any = null;
-      for (const ind of allIndustries) {
-        for (const sub of ind.l2) {
-          const comp = (sub.cs || []).find(c => c.c === code);
-          if (comp) {
-            cMarket = comp.market || 'A';
-            foundComp = comp;
-            break;
-          }
-        }
-        if (foundComp) break;
-      }
+  const fairPrice = data.eps > 0 ? fairPE * data.eps : 0;
 
-      let mk = '0';
-      if (cMarket === 'HK') {
-        mk = '116';
-      } else if (cMarket === 'GLOBAL') {
-        // Simple heuristic for US stocks if no specific market type is stored
-        // Most US tech stocks are on NASDAQ (105)
-        mk = '105'; 
-      } else {
-        mk = code.startsWith('6') ? '1' : '0';
-      }
-      
-      const fetchPrice = () => {
-        const cbName = `jsonp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        
-        // Add timeout to detect silent JSONP failures
-        const timeoutId = setTimeout(() => {
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-        }, 8000);
-        
-        (window as any)[cbName] = (d: any) => {
-          clearTimeout(timeoutId);
-          if (d.data) {
-            const pScale = mk === '116' ? 1000 : 100;
-            const pVal = d.data.f43 !== undefined && d.data.f43 !== '-' ? d.data.f43 : (d.data.f2 !== undefined && d.data.f2 !== '-' ? d.data.f2 : d.data.f60);
-            const chVal = d.data.f4 !== undefined && d.data.f4 !== '-' ? d.data.f4 : d.data.f170;
-            // 优先用 f3（标准涨跌幅%），f171 有时返回错误值
-            const rawCp = d.data.f3 !== undefined && d.data.f3 !== '-' ? d.data.f3 : d.data.f171;
+  // 信心评估
+  const confidence: PERelativeResult['confidence'] =
+    (industryPE > 0 && hasHistory && hasGrowth && data.eps > 0) ? 'high'
+    : (industryPE > 0 && data.eps > 0) ? 'medium' : 'low';
 
-            const p = pVal !== undefined && pVal !== '-' ? (pVal / pScale).toFixed(mk === '116' ? 3 : 2) : '—';
-            const ch = chVal !== undefined && chVal !== '-' ? (chVal / pScale).toFixed(mk === '116' ? 3 : 2) : '—';
-            // 涨跌幅：如果 API 返回的为 0 但有价格和昨收，手动计算
-            let cp = rawCp !== undefined && rawCp !== '-' ? (rawCp / 100).toFixed(2) : '—';
-            if (cp === '0.00' && pVal > 0 && d.data.f60 > 0) {
-              cp = (((pVal - d.data.f60) / d.data.f60) * 100).toFixed(2);
-            }
-            
-            const pe = d.data.f162 !== '-' && d.data.f162 !== undefined && d.data.f162 > 0 ? (d.data.f162 / 100).toFixed(2) : (d.data.f9 !== '-' && d.data.f9 !== undefined && d.data.f9 > 0 ? (d.data.f9 / 100).toFixed(2) : undefined);
-            const pb = d.data.f167 !== '-' && d.data.f167 !== undefined && d.data.f167 > 0 ? (d.data.f167 / 100).toFixed(2) : (d.data.f23 !== '-' && d.data.f23 !== undefined && d.data.f23 > 0 ? (d.data.f23 / 100).toFixed(2) : undefined);
-            const dy = d.data.f173 !== '-' && d.data.f173 !== undefined ? (d.data.f173 / 100).toFixed(2) : undefined;
-            const ps = d.data.f188 !== '-' && d.data.f188 !== undefined && d.data.f188 > 0 ? (d.data.f188 / 100).toFixed(2) : undefined;
-            const mcap = d.data.f116 !== '-' && d.data.f116 !== undefined ? (d.data.f116 / 100000000).toFixed(2) : undefined;
-            const fcap = d.data.f117 !== '-' && d.data.f117 !== undefined ? (d.data.f117 / 100000000).toFixed(2) : undefined;
-
-            setLivePrice({ p, ch, cp, up: parseFloat(ch) >= 0, pe, pb, dy, ps, mcap, fcap });
-          }
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-        };
-        
-        const script = document.createElement('script');
-        script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${mk}.${code}&fields=f43,f170,f171,f2,f3,f4,f162,f167,f173,f188,f116,f117,f9,f23,f60,f169&cb=${cbName}`;
-        script.onerror = () => {
-          clearTimeout(timeoutId);
-          console.error('Failed to fetch price');
-          delete (window as any)[cbName];
-          const scriptEl = document.getElementById(cbName);
-          if (scriptEl) scriptEl.remove();
-        };
-        document.head.appendChild(script);
-      };
-      fetchPrice();
-      const timer = setInterval(fetchPrice, 10000);
-      return () => clearInterval(timer);
-    } else {
-      setLivePrice(null);
-    }
-  }, [view, navArgs]);
-
-  const handleDeleteCompany = (code: string) => {
-    setConfirmDialog({
-      title: '删除公司',
-      message: '确定删除该公司吗？删除后可通过设置恢复。',
-      onConfirm: () => {
-        const newDeleted = [...deletedCompanies, code];
-        setDeletedCompanies(newDeleted);
-        localStorage.setItem('iv_deleted_comps', JSON.stringify(newDeleted));
-        const newCustom = customCompanies.filter(c => c.c !== code);
-        setCustomCompanies(newCustom);
-        localStorage.setItem('iv_custom_comps', JSON.stringify(newCustom));
-        setView('home');
-        setConfirmDialog(null);
-      }
-    });
+  return {
+    fairPE,
+    fairPrice,
+    params: {
+      industryPE,
+      historicalPE: historicalFairPE,
+      roeAdjustment,
+      growthAdjustment: currentGrowth,
+      currentROE,
+      currentGrowth,
+    },
+    weights,
+    confidence,
   };
+}
 
-  const handleRestoreDefaults = () => {
-    setCustomCompanies([]);
-    localStorage.removeItem('iv_custom_comps');
-    setDeletedCompanies([]);
-    localStorage.removeItem('iv_deleted_comps');
-    setView('home');
-  };
+// ─── Gordon 股利折现模型 ───
 
-  const handleRestoreDefaultIndices = () => {
-    setConfirmDialog({
-      title: '恢复默认指数',
-      message: '将重置为系统默认指数列表，你手动添加的指数会被移除。',
-      onConfirm: () => {
-        setIndices([...DEFAULT_INDICES]);
-        localStorage.setItem('iv_indices', JSON.stringify(DEFAULT_INDICES));
-        setFavIndices([]);
-        localStorage.setItem('iv_fav_indices', JSON.stringify([]));
-        setConfirmDialog(null);
+/**
+ * Gordon Growth Model (DDM)
+ *
+ * V = D₁ / (r - g) = D₀ × (1 + g) / (r - g)
+ *
+ * 对于低分红公司，用 RIM（剩余收益模型）近似：
+ * V = BV + Σ (ROE - r) × BV₍ₜ₋₁₎ / (1+r)ᵗ
+ */
+export function calculateGordon(data: CompleteStockData, params?: GordonParams): GordonResult {
+  const p = params || VALUATION_PRESETS.neutral.config.gordon;
+  const currentBVPS = validNum(data.bvps, 0);
+  const currentROE = data.roe > 0 ? data.roe / 100 : 0;
+  const currentDY = data.dy > 0 ? data.dy / 100 : 0;
+  const currentEPS = validNum(data.eps, 0);
+
+  // 要求回报率（连续计算）
+  const Rf = 0.025;
+  const ERP = 0.06;
+  const beta = estimateBeta(data);
+  const requiredReturn = Rf + beta * ERP;
+
+  // 连续估算当前每股股利
+  let currentDividend = 0;
+  if (data.dividendPerShare > 0) {
+    currentDividend = data.dividendPerShare;
+  } else if (currentDY > 0 && data.price > 0) {
+    currentDividend = data.price * currentDY;
+  } else if (currentEPS > 0) {
+    const payoutRatio = estimatePayoutRatio(data);
+    currentDividend = currentEPS * payoutRatio;
+  }
+
+  // 分红增长率 = ROE × 留存率（连续计算）
+  const payoutRatio = currentEPS > 0 ? clamp(currentDividend / currentEPS, 0, 1) : p.defaultPayoutRatio;
+  const retentionRatio = clamp(1 - payoutRatio, 0, 1);
+  const dividendGrowthRate = clamp(currentROE * retentionRatio, 0, p.maxGrowthRate);
+
+  let intrinsicValue = 0;
+  let impliedPE = 0;
+  let impliedPB = 0;
+  let marginOfSafety = 0;
+
+  // 判断用 Gordon 还是 RIM
+  const isHighDividend = currentDividend > 0 && currentDY > 0.02;
+
+  if (isHighDividend && dividendGrowthRate < requiredReturn - 0.005) {
+    // Gordon Growth Model
+    const D1 = currentDividend * (1 + dividendGrowthRate);
+    intrinsicValue = D1 / (requiredReturn - dividendGrowthRate);
+    impliedPE = currentEPS > 0 ? intrinsicValue / currentEPS : 0;
+    impliedPB = currentBVPS > 0 ? intrinsicValue / currentBVPS : 0;
+  } else if (currentBVPS > 0 && currentROE > 0) {
+    // RIM（剩余收益模型）— 逐 year 计算
+    const rimYears = 10;
+    let rimValue = currentBVPS;
+    let bv = currentBVPS;
+    const roeFadeRate = (currentROE - requiredReturn) * 0.05; // ROE 每年衰减
+
+    for (let y = 1; y <= rimYears; y++) {
+      const yearROE = Math.max(currentROE - (y - 1) * roeFadeRate, requiredReturn);
+      const residualIncome = (yearROE - requiredReturn) * bv;
+      if (residualIncome > 0) {
+        rimValue += residualIncome / Math.pow(1 + requiredReturn, y);
       }
-    });
-  };
-
-  const getIndustryValuation = (ind: Industry) => {
-    // Priority: Use BK index data if available
-    if (ind.bk && batchData[ind.bk]) {
-      const bkd = batchData[ind.bk];
-      return {
-        pe: bkd.pe,
-        pb: bkd.pb,
-        dy: bkd.dy,
-        cp: bkd.cp,
-        roe: (bkd.pe && bkd.pb && Number(bkd.pe) > 0) ? ((Number(bkd.pb) / Number(bkd.pe)) * 100).toFixed(1) : undefined,
-        source: 'index'
-      };
+      // 账面价值增长也逐 year 衰减
+      const yearGrowth = currentROE * retentionRatio * Math.pow(0.95, y);
+      bv = bv * (1 + yearGrowth);
     }
 
-    let totalPE = 0, totalPB = 0, totalDY = 0, totalCP = 0, totalMCap = 0;
-    let peCount = 0, pbCount = 0, dyCount = 0, cpCount = 0;
-
-    ind.l2.forEach(sub => {
-      sub.cs.forEach(c => {
-        const bd = batchData[c.c];
-        const pe = bd?.pe ? parseFloat(bd.pe) : undefined;
-        const pb = bd?.pb ? parseFloat(bd.pb) : undefined;
-        const dy = bd?.dy ? parseFloat(bd.dy) : undefined;
-        const mcap = bd?.mcap ? parseFloat(bd.mcap) : 1;
-        const cp = bd?.cp ? parseFloat(bd.cp) : undefined;
-
-        if (pe && pe > 0) { totalPE += pe * mcap; peCount += mcap; }
-        if (pb && pb > 0) { totalPB += pb * mcap; pbCount += mcap; }
-        if (dy && dy > 0) { totalDY += dy * mcap; dyCount += mcap; }
-        if (cp !== undefined) { totalCP += cp * mcap; cpCount += mcap; }
-      });
-    });
-
-    const avgPE = peCount > 0 ? (totalPE / peCount).toFixed(1) : undefined;
-    const avgPB = pbCount > 0 ? (totalPB / pbCount).toFixed(2) : undefined;
-    const avgDY = dyCount > 0 ? (totalDY / dyCount).toFixed(2) : undefined;
-    const avgCP = cpCount > 0 ? (totalCP / cpCount).toFixed(2) : undefined;
-    const avgROE = (avgPE && avgPB && Number(avgPE) > 0) ? ((Number(avgPB) / Number(avgPE)) * 100).toFixed(1) : undefined;
-
-    return { pe: avgPE, pb: avgPB, roe: avgROE, dy: avgDY, cp: avgCP, source: 'calc' };
-  };
-
-  const renderHome = () => (
-    <div className="space-y-4">
-      {/* Market Switcher */}
-      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
-        <button
-          onClick={() => setMarket('A')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
-            market === 'A' ? 'tab-pill-active' : 'tab-pill-inactive'
-          }`}
-        >
-          A股行业
-        </button>
-        <button
-          onClick={() => setMarket('HK')}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
-            market === 'HK' ? 'tab-pill-active' : 'tab-pill-inactive'
-          }`}
-        >
-          港股行业
-        </button>
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-3 gap-2.5">
-        <div className="stat-cell">
-          <div className="stat-label">一级行业</div>
-          <div className="text-xl font-extrabold text-brand-600 tabular-nums">{currentIndustries.length}</div>
-        </div>
-        <div className="stat-cell">
-          <div className="stat-label">相关公司</div>
-          <div className="text-xl font-extrabold text-cyan-600 tabular-nums">
-            {currentIndustries.reduce((a, i) => a + i.l2.reduce((b, s) => b + (s.cs || []).length, 0), 0)}
-          </div>
-        </div>
-        <div className="stat-cell">
-          <div className="stat-label">低估行业</div>
-          <div className="text-xl font-extrabold text-emerald-600 tabular-nums">
-            {currentIndustries.filter(i => i.ev === 'low').length}
-          </div>
-        </div>
-      </div>
-
-      {/* Filter Pills */}
-      <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card overflow-x-auto">
-        {(['all', 'low', 'mid', 'high'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setFilter(t)}
-            className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all duration-200 whitespace-nowrap ${
-              filter === t 
-                ? 'bg-slate-900 text-white shadow-md' 
-                : 'text-slate-400'
-            }`}
-          >
-            {t === 'all' ? '全部' : t === 'low' ? '低估' : t === 'mid' ? '适中' : '高估'}
-          </button>
-        ))}
-      </div>
-
-      {/* Industry Cards */}
-      <div className="space-y-3">
-        {currentIndustries.filter(i => filter === 'all' || i.ev === filter).map((ind, idx) => {
-          const indVal = getIndustryValuation(ind);
-          return (
-          <motion.div
-            layout
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            key={ind.id}
-            onClick={() => navigate('ind', idx)}
-            className="card-interactive p-4 relative overflow-hidden"
-          >
-            {indVal.source === 'index' && (
-              <div className="absolute top-0 right-0 badge-brand rounded-bl-xl px-2.5 py-1 scale-90 origin-top-right">
-                实时数据
-              </div>
-            )}
-            <div className="flex justify-between items-center mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-[15px] font-extrabold text-slate-900">{ind.ic} {ind.nm}</span>
-                {indVal.cp !== undefined && (
-                  <span className={`text-[10px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                    {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
-                  </span>
-                )}
-              </div>
-              <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
-                {evText(ind.ev)}
-              </span>
-            </div>
-            {Number(indVal.pe) > 0 && (
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="stat-cell py-2">
-                  <div className="stat-label">PE</div>
-                  <div className="stat-value">{indVal.pe}</div>
-                </div>
-                <div className="stat-cell py-2">
-                  <div className="stat-label">PB</div>
-                  <div className="stat-value">{indVal.pb}</div>
-                </div>
-                <div className="stat-cell py-2">
-                  <div className="stat-label">股息率</div>
-                  <div className="stat-value">{indVal.dy}%</div>
-                </div>
-              </div>
-            )}
-            <div className="flex flex-wrap gap-1.5">
-              {ind.l2.map(s => (
-                <span key={s.nm} className="text-[9px] px-2 py-0.5 bg-surface text-slate-500 border border-slate-100/80 rounded-md font-semibold">
-                  {s.nm}
-                </span>
-              ))}
-            </div>
-          </motion.div>
-        )})}
-      </div>
-    </div>
-  );
-
-  const renderInd = (idx: number) => {
-    const ind = currentIndustries[idx];
-    if (!ind) return null;
-    const indVal = getIndustryValuation(ind);
-    return (
-      <div className="space-y-5">
-        {/* Breadcrumb */}
-        <div className="breadcrumb">
-          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
-          <ChevronRight size={11} />
-          <span className="text-slate-600 font-medium">{ind.nm}</span>
-        </div>
-
-        {/* Industry Overview Card */}
-        <div className="card-elevated p-5 relative overflow-hidden">
-          {indVal.source === 'index' && (
-            <div className="absolute top-0 right-0 badge-brand rounded-bl-xl px-2.5 py-1">
-              实时指数数据
-            </div>
-          )}
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-lg font-extrabold text-slate-900">{ind.ic} {ind.nm}</h2>
-              {indVal.cp !== undefined && (
-                <span className={`text-[11px] font-bold tabular-nums ${parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                  {parseFloat(indVal.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(indVal.cp)).toFixed(2)}%
-                </span>
-              )}
-            </div>
-            <span className={`badge ${ind.ev === 'low' ? 'val-low' : ind.ev === 'mid' ? 'val-mid' : 'val-high'}`}>
-              {evText(ind.ev)}
-            </span>
-          </div>
-
-          {ind.indices && ind.indices.length > 0 && (
-            <div className="mb-4">
-              <div className="stat-label mb-2">相关指数</div>
-              <div className="flex flex-wrap gap-2">
-                {ind.indices.map(idxInfo => {
-                  const bd = batchData[idxInfo.c];
-                  return (
-                    <button
-                      key={idxInfo.c}
-                      onClick={() => navigate('index', idx, idxInfo.c)}
-                      className="stat-cell px-3 py-2 text-left active:scale-95 transition-transform"
-                    >
-                      <div className="text-[10px] font-bold text-slate-700">{idxInfo.n}</div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                        {bd?.cp && (
-                          <span className={`text-[9px] font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            {parseFloat(bd.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            {[
-              { label: 'PE', val: indVal.pe || '—' },
-              { label: 'PB', val: indVal.pb || '—' },
-              { label: 'ROE', val: indVal.roe ? `${indVal.roe}%` : '—' },
-              { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '—' },
-            ].map(m => (
-              <div key={m.label} className="stat-cell">
-                <div className="stat-label">{m.label}</div>
-                <div className={`stat-value ${m.color || ''}`}>{m.val}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Sub-industries */}
-        <div className="space-y-2.5">
-          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">二级行业</h3>
-          {ind.l2.map((s, si) => (
-            <div
-              key={s.nm}
-              onClick={() => navigate('sub', idx, si)}
-              className="card-interactive p-4 flex justify-between items-center"
-            >
-              <div className="flex items-center gap-2.5">
-                <span className="text-[13px] font-bold text-slate-800">{s.nm}</span>
-                <span className="badge-brand text-[8px]">二级</span>
-              </div>
-              <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
-                {s.cs.length}家 <ChevronRight size={13} className="text-slate-300" />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Company Cards */}
-        <div className="space-y-2.5">
-          <h3 className="text-sm font-extrabold text-slate-900 px-0.5">相关公司</h3>
-          {ind.l2.flatMap(s => s.cs.map(c => ({ ...c, sn: s.nm }))).map(c => (
-            <div
-              key={`${c.market || 'A'}-${c.c}`}
-              onClick={() => navigate('comp', c.c, c.n)}
-              className="card-interactive p-4"
-            >
-              <div className="flex justify-between items-start mb-2.5">
-                <div>
-                  <div className="text-[13px] font-bold text-slate-900">{c.n}</div>
-                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">{c.c} · {c.sn}</div>
-                </div>
-                {batchData[c.c] && batchData[c.c].p && (
-                  <div className="text-right">
-                    <div className="text-[13px] font-bold text-slate-900 tabular-nums">¥{batchData[c.c].p}</div>
-                    <div className={`text-[10px] font-bold tabular-nums ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {parseFloat(batchData[c.c].cp || '0') >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(batchData[c.c].cp || '0')).toFixed(2)}%
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {[
-                  { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                  { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
-                  { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                  { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                  { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
-                ].map(m => (
-                  <div key={m.l} className="stat-cell py-1.5">
-                    <div className="stat-label text-[7px]">{m.l}</div>
-                    <div className="text-[10px] font-bold text-slate-700 tabular-nums">{m.v}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderSub = (idx: number, sidx: number) => {
-    const ind = currentIndustries[idx];
-    if (!ind) return null;
-    const sub = ind.l2[sidx];
-    if (!sub) return null;
-    return (
-      <div className="space-y-4">
-        <div className="breadcrumb">
-          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
-          <ChevronRight size={12} />
-          <button onClick={() => navigate('ind', idx)} className="breadcrumb-link">{ind.nm}</button>
-          <ChevronRight size={12} />
-          <span>{sub.nm}</span>
-        </div>
-
-        <div className="flex items-center gap-2 mb-2">
-          <h2 className="text-lg font-bold text-slate-800">{ind.ic} {sub.nm}</h2>
-          <span className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-500 rounded font-bold">二级</span>
-        </div>
-
-        <div className="space-y-3">
-          {sub.cs.map(c => (
-            <div
-              key={`${c.market || 'A'}-${c.c}`}
-              onClick={() => navigate('comp', c.c, c.n)}
-              className="card-interactive p-4"
-            >
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <div className="text-sm font-bold text-slate-800">{c.n}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{c.c}</div>
-                </div>
-                {batchData[c.c] && batchData[c.c].p && (
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-slate-800">¥{batchData[c.c].p}</div>
-                    <div className={`text-[10px] font-bold ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                      {parseFloat(batchData[c.c].cp || '0') >= 0 ? '+' : ''}{batchData[c.c].cp}%
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-5 gap-1">
-                {[
-                  { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                  { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
-                  { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                  { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                  { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
-                ].map(m => (
-                  <div key={m.l} className="bg-slate-50 rounded-lg py-1 text-center">
-                    <div className="text-[8px] text-slate-400 font-bold uppercase">{m.l}</div>
-                    <div className="text-[10px] font-bold text-slate-700">{m.v}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderComp = (code: string, name: string) => {
-    let ind: Industry | undefined;
-    let c: any;
-    
-    // Trim code for robust matching
-    const tCode = code.trim();
-
-    for (const i of allIndustries) {
-      const allC = i.l2.flatMap(s => s.cs.map(comp => ({ ...comp, sn: s.nm })));
-      const found = allC.find(x => x.c === tCode);
-      if (found) {
-        ind = i;
-        c = found;
-        break;
-      }
-    }
-    
-    // Fallback search in customCompanies if not found in allIndustries (though it should be)
-    if (!c) {
-      const found = customCompanies.find(x => x.c === tCode);
-      if (found) {
-        c = found;
-        ind = allIndustries.find(i => i.nm === (found.indName || '其他行业')) || allIndustries[0];
-      }
+    // 终值
+    const terminalROE = Math.max(currentROE - rimYears * roeFadeRate, requiredReturn + 0.01);
+    const terminalRI = (terminalROE - requiredReturn) * bv;
+    if (terminalRI > 0) {
+      const tv = terminalRI / (requiredReturn - 0.03);
+      rimValue += tv / Math.pow(1 + requiredReturn, rimYears);
     }
 
-    if (!c || !ind) return <div className="p-8 text-center text-gray-500">未找到公司数据 ({tCode})</div>;
+    intrinsicValue = rimValue;
+    impliedPE = currentEPS > 0 ? intrinsicValue / currentEPS : 0;
+    impliedPB = currentBVPS > 0 ? intrinsicValue / currentBVPS : 0;
+  } else if (currentBVPS > 0) {
+    // 兜底：PB 合理估值
+    intrinsicValue = currentBVPS * 1.5;
+    impliedPB = 1.5;
+    impliedPE = currentEPS > 0 ? intrinsicValue / currentEPS : 0;
+  }
 
-    const ii = currentIndustries.findIndex(i => i.id === ind?.id);
+  marginOfSafety = data.price > 0 ? ((intrinsicValue - data.price) / data.price) * 100 : 0;
 
-    // ─── 数据源：优先使用实时获取的数据，回退到静态/批量数据 ───
-    const realtimeData = stockDetailData[tCode];
-    const isLoading = stockDetailLoading[tCode];
-    const valResult = valuationResults[tCode];
+  const confidence: GordonResult['confidence'] =
+    (isHighDividend && currentROE > 0.1) ? 'high'
+    : (currentBVPS > 0 && currentROE > 0.05) ? 'medium' : 'low';
 
-    const currentPE = realtimeData?.pe && realtimeData.pe > 0 ? realtimeData.pe
-      : (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
-    const currentPB = realtimeData?.pb && realtimeData.pb > 0 ? realtimeData.pb
-      : (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
-    const currentDY = realtimeData?.dy ? realtimeData.dy
-      : (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
-    const currentROE = realtimeData?.roe || batchData[tCode]?.roe || 0;
-    const currentEPS = realtimeData?.eps || batchData[tCode]?.eps || 0;
-    const currentBVPS = realtimeData?.bvps || 0;
-    const currentPrice = realtimeData?.price && realtimeData.price > 0 ? realtimeData.price
-      : ((livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0'));
-    // 新增：从 batchData 获取增长率和分红数据，供给 valuationService 使用
-    const bdRevenueGrowth = batchData[tCode]?.revenueGrowth;
-    const bdNetIncomeGrowth = batchData[tCode]?.netIncomeGrowth;
-    const bdDividendPerShare = batchData[tCode]?.dividendPerShare;
+  return {
+    intrinsicValue,
+    impliedPE,
+    impliedPB,
+    params: {
+      currentDividend,
+      dividendGrowthRate,
+      requiredReturn,
+      retentionRatio,
+      roe: currentROE,
+    },
+    marginOfSafety,
+    confidence,
+  };
+}
 
-    // ─── 增强估值（优先使用 valuationService 计算结果）───
-    let dcfPE = 0, peFairPE = 0, gordonPE = 0, pbFair = 0, fairPE = 0, margin = 0;
-    let dcfDetail: any = null, peDetail: any = null, gordonDetail: any = null;
-    let modelWeights = { dcf: 0.33, pe: 0.34, gordon: 0.33 };
+/**
+ * 连续估算分红比例
+ * 不再用离散档位，而是用 PE 和 ROE 连续插值
+ */
+function estimatePayoutRatio(data: CompleteStockData): number {
+  const roe = data.roe > 0 ? data.roe / 100 : 0.1;
+  const pe = validNum(data.pe, 20);
+  const dy = data.dy > 0 ? data.dy / 100 : 0;
 
-    if (valResult && currentPE > 0) {
-      // 使用增强估值结果
-      dcfPE = valResult.dcf.impliedPE;
-      peFairPE = valResult.peRelative.fairPE;
-      gordonPE = valResult.gordon.impliedPE;
-      pbFair = valResult.gordon.impliedPB;
-      fairPE = valResult.compositeFairPE;
-      margin = valResult.compositeMargin;
-      modelWeights = valResult.modelWeights;
-      dcfDetail = valResult.dcf;
-      peDetail = valResult.peRelative;
-      gordonDetail = valResult.gordon;
-    } else if (currentPE > 0) {
-      // 回退到原有简单估值（实时数据不可用时）
-      const rf = 0.025, erp = 0.06, beta = 1, wacc = rf + beta * erp;
-      const growth = currentROE > 20 ? 0.08 : currentROE > 15 ? 0.06 : currentROE > 10 ? 0.04 : 0.02;
-      const tg = 0.025, yrs = 10, eps = currentPE > 0 ? (100 / currentPE) : 0;
-      let dcf = 0;
-      for (let y = 1; y <= yrs; y++) dcf += eps * Math.pow(1 + growth, y) / Math.pow(1 + wacc, y);
-      dcf += (eps * Math.pow(1 + growth, yrs) * (1 + tg)) / (wacc - tg) / Math.pow(1 + wacc, yrs);
-      dcfPE = eps > 0 ? (dcf / eps) : 0;
-      const indPE = 20; // 默认值，增强估值用 valuationService 计算的行业 PE
-      peFairPE = indPE * (currentROE / 15);
-      const gROE = currentROE / 100, gG = Math.min(gROE * 0.3, 0.04);
-      pbFair = gROE > 0 ? ((gROE - gG) / (wacc - gG)) : 0;
-      gordonPE = gROE > 0 ? (pbFair / gROE) : 0;
-      fairPE = (dcfPE + peFairPE + gordonPE) / 3;
-      margin = currentPE > 0 ? ((fairPE - currentPE) / currentPE * 100) : 0;
-    }
+  // 如果有实际股息率，直接用
+  if (dy > 0 && data.price > 0 && data.eps > 0) {
+    return clamp(dy / (data.eps / data.price), 0, 1);
+  }
 
-    let vc = 'bg-slate-50 text-slate-400', vt = '—';
-    if (currentPE <= 0) { vc = 'bg-amber-50 text-amber-600'; vt = '⚠️ 亏损'; }
-    else if (margin > 25) { vc = 'bg-emerald-50 text-emerald-600'; vt = `低估 +${margin.toFixed(0)}%`; }
-    else if (margin > -15) { vc = 'bg-amber-50 text-amber-600'; vt = `合理 ${margin >= 0 ? '+' : ''}${margin.toFixed(0)}%`; }
-    else { vc = 'bg-red-50 text-red-600'; vt = `高估 ${margin.toFixed(0)}%`; }
+  // 连续公式：高 ROE + 低 PE → 高分红；高 PE → 低分红（成长期）
+  // 基准分红比例 30%
+  let payout = 0.30;
 
-    const rg = getGrade(currentROE, [25, 20, 15, 10]);
-    const dg = getGrade(currentDY, [5, 3, 2, 1]);
-    const pg = currentPE > 0 ? getGrade(100 / currentPE, [25, 15, 10, 5]) : 'N/A';
-    const bg = getGrade(100 / currentPB, [100, 50, 25, 10]);
+  // ROE 修正：ROE 越高，分红越多（盈利能力强）
+  // ROE 5%→-10%, ROE 25%→+15%
+  payout += (roe - 0.15) * 0.5;
 
-    return (
-      <div className="space-y-4">
-        <div className="breadcrumb">
-          <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
-          <ChevronRight size={12} />
-          <button onClick={() => ii >= 0 ? navigate('ind', ii) : setView('home')} className="breadcrumb-link">{ind.nm}</button>
-          <ChevronRight size={12} />
-          <span>{c.n}</span>
-        </div>
+  // PE 修正：PE 越高，分红越少（成长期保留利润）
+  // PE 10→+10%, PE 50→-15%
+  payout -= (pe - 20) * 0.005;
 
-        <div className="card-elevated p-5 space-y-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800">{c.n}</h2>
-              <div className="text-xs text-slate-400 font-mono mt-1">{c.c} · {ind.nm}/{c.sn}</div>
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={() => handleDeleteCompany(c.c)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
-                <Trash2 size={20} />
-              </button>
-              <button onClick={(e) => toggleFav(c.c, 'stock', e)} className="p-2 text-amber-400">
-                {favStocks.includes(c.c) ? <Star fill="currentColor" size={24} /> : <Star size={24} />}
-              </button>
-            </div>
-          </div>
+  return clamp(payout, 0.05, 0.7);
+}
 
-          <div className="space-y-3">
-            <div className="flex flex-col gap-1">
-              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">实时价格</div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-slate-800 tabular-nums">
-                  {(() => {
-                    const p = (livePrice && livePrice.p !== '—') ? livePrice.p : batchData[tCode]?.p;
-                    return p ? `¥${p}` : '加载中...';
-                  })()}
-                </span>
-                {(() => {
-                  const cp = livePrice?.cp || batchData[tCode]?.cp;
-                  if (!cp || cp === '—') return null;
-                  const val = parseFloat(cp);
-                  return (
-                    <span className={`text-sm font-bold tabular-nums ${val >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {val >= 0 ? '+' : ''}{cp}%
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
+// ─── 综合估值 ───
 
-            {currentPE > 0 ? (
-              <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">综合估值 (DCF+PE+Gordon)</div>
-                  <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                    {(() => {
-                      const priceStr = (livePrice && livePrice.p !== '—') ? livePrice.p : (batchData[tCode]?.p || null);
-                      return priceStr && currentPE > 0 ? `¥${(parseFloat(priceStr) * (fairPE / currentPE)).toFixed(2)}` : '—';
-                    })()}
-                    <span className="text-xs font-medium ml-1 opacity-70">PE {fairPE.toFixed(1)}x</span>
-                  </div>
-                </div>
-                <div className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm ${vc}`}>
-                  {vt}
-                </div>
-              </div>
-            ) : (
-              <div className={`text-xs font-bold px-3 py-1.5 rounded-lg inline-block ${vc}`}>
-                {vt}
-              </div>
-            )}
-          </div>
+/**
+ * 三个模型加权综合估值
+ *
+ * 权重根据：
+ * - DCF: 对现金流稳定的公司权重更高
+ * - PE: 对有行业可比的公司权重更高
+ * - Gordon: 对高分红的公司权重更高
+ */
+export function calculateValuationSummary(
+  data: CompleteStockData,
+  industryPE: number,
+  config?: ValuationConfig
+): ValuationSummary {
+  const cfg = config || VALUATION_PRESETS.neutral.config;
+  const dcf = calculateDCF(data, cfg.dcf);
+  const peRelative = calculatePERelative(data, industryPE, cfg.pe);
+  const gordon = calculateGordon(data, cfg.gordon);
 
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe?.toFixed(1) || '—' },
-              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb?.toFixed(2) || '—' },
-              { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
-              { l: '股息率', v: batchData[tCode]?.dy ? `${batchData[tCode].dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—') },
-              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps?.toFixed(1) || '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—') },
-              { l: 'EPS', v: batchData[tCode]?.eps ? `${batchData[tCode].eps.toFixed(2)}` : '—' },
-              { l: 'ROA', v: batchData[tCode]?.roa ? `${batchData[tCode].roa.toFixed(1)}%` : '—' },
-              { l: '负债率', v: batchData[tCode]?.debt ? `${batchData[tCode].debt.toFixed(1)}%` : '—' },
-            ].map(m => (
-              <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
-                <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
-                <div className="text-sm font-bold text-slate-700">{m.v}</div>
-              </div>
-            ))}
-          </div>
+  // 动态权重（基于数据质量）
+  const isHighDividend = data.dy > 3;
+  const hasStableCF = data.history && data.history.years.length >= 3;
+  const hasIndustryComp = industryPE > 0;
+  const dcfConf = dcf.confidence === 'high' ? 1 : dcf.confidence === 'medium' ? 0.6 : 0.3;
+  const peConf = peRelative.confidence === 'high' ? 1 : peRelative.confidence === 'medium' ? 0.6 : 0.3;
+  const gordonConf = gordon.confidence === 'high' ? 1 : gordon.confidence === 'medium' ? 0.6 : 0.3;
 
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { l: '盈利能力', v: rg },
-              { l: '分红能力', v: dg },
-              { l: 'PE估值', v: pg },
-              { l: 'PB估值', v: bg },
-            ].map(m => (
-              <div key={m.l} className="bg-white border border-slate-100 rounded-xl p-2 text-center shadow-sm">
-                <div className="text-[9px] text-slate-400 font-bold">{m.l}</div>
-                <div className={`text-lg font-bold ${gColor(m.v)}`}>{m.v}</div>
-              </div>
-            ))}
-          </div>
-
-          {currentPE > 0 && (
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-indigo-600 flex items-center gap-1">
-                  <TrendingUp size={14} /> 多模型综合估值
-                </h3>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => navigate('settings')} className="text-[9px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-500 font-bold hover:bg-indigo-100 transition-colors">
-                    {activePreset ? VALUATION_PRESETS[activePreset].name : '自定义'} ⚙️
-                  </button>
-                  {isLoading && <Loader2 size={14} className="animate-spin text-indigo-400" />}
-                  {realtimeData && realtimeData.source === 'live' && (
-                    <span className="text-[9px] text-emerald-500 font-bold">● 实时</span>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {/* DCF 模型 */}
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">
-                    ① DCF 现金流折现
-                    <span className="text-[9px] ml-1 opacity-60">({(modelWeights.dcf * 100).toFixed(0)}%)</span>
-                  </span>
-                  <span className="font-mono font-bold text-slate-700">PE {dcfPE.toFixed(1)}x</span>
-                </div>
-                {dcfDetail ? (
-                  <div className="text-[9px] text-slate-400 font-medium">
-                    WACC {(dcfDetail.params.wacc * 100).toFixed(1)}%
-                    {dcfDetail.params.growthPhases.map((p: any, i: number) => (
-                      <span key={i}> · 阶段{i+1}{(p.growth * 100).toFixed(1)}%×{p.years}年</span>
-                    ))}
-                    · 永续 {(dcfDetail.params.terminalGrowth * 100).toFixed(1)}%
-                  </div>
-                ) : (
-                  <div className="text-[9px] text-slate-400 font-medium">
-                    WACC 8.5% · 增长 {currentROE > 20 ? '8' : currentROE > 15 ? '6' : currentROE > 10 ? '4' : '2'}% · 永续 2.5%
-                  </div>
-                )}
-                <div className="border-b border-slate-200 my-1" />
-
-                {/* PE 相对估值 */}
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">
-                    ② PE 相对估值
-                    <span className="text-[9px] ml-1 opacity-60">({(modelWeights.pe * 100).toFixed(0)}%)</span>
-                  </span>
-                  <span className="font-mono font-bold text-slate-700">PE {peFairPE.toFixed(1)}x</span>
-                </div>
-                {peDetail && (
-                  <div className="text-[9px] text-slate-400 font-medium">
-                    行业PE{peDetail.params.industryPE.toFixed(1)}×ROE修正{(peDetail.params.roeAdjustment).toFixed(2)}
-                    · 增长率{(peDetail.params.currentGrowth * 100).toFixed(1)}%
-                  </div>
-                )}
-
-                {/* Gordon 模型 */}
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">
-                    ③ Gordon 股利折现
-                    <span className="text-[9px] ml-1 opacity-60">({(modelWeights.gordon * 100).toFixed(0)}%)</span>
-                  </span>
-                  <span className="font-mono font-bold text-slate-700">PE {gordonPE.toFixed(1)}x (PB {pbFair.toFixed(2)}x)</span>
-                </div>
-                {gordonDetail && (
-                  <div className="text-[9px] text-slate-400 font-medium">
-                    股利{(gordonDetail.params.currentDividend.toFixed(2))} · 增长率{(gordonDetail.params.dividendGrowthRate * 100).toFixed(1)}%
-                    · 要求回报{(gordonDetail.params.requiredReturn * 100).toFixed(1)}%
-                  </div>
-                )}
-
-                <div className="border-t-2 border-slate-200 pt-2 flex justify-between text-xs font-bold">
-                  <span className="text-slate-800">综合合理 PE</span>
-                  <span className="text-indigo-600">PE {fairPE.toFixed(1)}x</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">当前 PE</span>
-                  <span className="text-slate-700">{currentPE > 0 ? currentPE.toFixed(2) : '亏损'}</span>
-                </div>
-                {currentPrice > 0 && fairPE > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">合理价格</span>
-                    <span className="font-mono text-indigo-600">¥{(currentPrice * (fairPE / currentPE)).toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-slate-800">安全边际</span>
-                  <span className={margin > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                    {margin > 0 ? '+' : ''}{margin.toFixed(1)}%
-                  </span>
-                </div>
-              </div>
-
-              {/* 实时财务数据摘要 */}
-              {realtimeData && realtimeData.source === 'live' && (
-                <div className="mt-3 pt-3 border-t border-slate-200 space-y-1">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">实时财务数据</div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px]">
-                    {realtimeData.revenue > 0 && <div className="flex justify-between"><span className="text-slate-400">营收</span><span className="font-mono text-slate-600">{realtimeData.revenue.toFixed(1)}亿</span></div>}
-                    {realtimeData.netIncome > 0 && <div className="flex justify-between"><span className="text-slate-400">净利润</span><span className="font-mono text-slate-600">{realtimeData.netIncome.toFixed(1)}亿</span></div>}
-                    {realtimeData.grossMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">毛利率</span><span className="font-mono text-slate-600">{realtimeData.grossMargin.toFixed(1)}%</span></div>}
-                    {realtimeData.netMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">净利率</span><span className="font-mono text-slate-600">{realtimeData.netMargin.toFixed(1)}%</span></div>}
-                    {realtimeData.roa > 0 && <div className="flex justify-between"><span className="text-slate-400">ROA</span><span className="font-mono text-slate-600">{realtimeData.roa.toFixed(1)}%</span></div>}
-                    {realtimeData.totalDebt > 0 && <div className="flex justify-between"><span className="text-slate-400">资产负债率</span><span className="font-mono text-slate-600">{realtimeData.totalDebt.toFixed(1)}%</span></div>}
-                    {realtimeData.revenueGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">营收增长</span><span className={`font-mono ${realtimeData.revenueGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{realtimeData.revenueGrowth >= 0 ? '+' : ''}{realtimeData.revenueGrowth.toFixed(1)}%</span></div>}
-                    {realtimeData.netIncomeGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">利润增长</span><span className={`font-mono ${realtimeData.netIncomeGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{realtimeData.netIncomeGrowth >= 0 ? '+' : ''}{realtimeData.netIncomeGrowth.toFixed(1)}%</span></div>}
-                  </div>
-                </div>
-              )}
-
-              {/* 历史利润趋势图 */}
-              {realtimeData?.history && realtimeData.history.years.length >= 2 && (
-                <div className="mt-3 pt-3 border-t border-slate-200">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">历年利润趋势</div>
-                  <ResponsiveContainer width="100%" height={120}>
-                    <BarChart data={[...realtimeData.history.years].reverse().map((y, i) => ({
-                      year: y,
-                      profit: [...realtimeData.history!.netIncomes].reverse()[i],
-                      revenue: [...realtimeData.history!.revenues].reverse()[i],
-                    }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="year" tick={{ fontSize: 9, fill: '#94a3b8' }} />
-                      <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} />
-                      <Tooltip
-                        contentStyle={{ fontSize: 11, borderRadius: 8 }}
-                        formatter={(value: number, name: string) => [`${value.toFixed(1)}亿`, name === 'profit' ? '净利润' : '营收']}
-                      />
-                      <Bar dataKey="revenue" fill="#c7d2fe" radius={[2, 2, 0, 0]} />
-                      <Bar dataKey="profit" fill="#6366f1" radius={[2, 2, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-xl text-xs text-slate-600 leading-relaxed">
-            {currentROE >= 20 ? '✅ ROE ' + currentROE + '% 优秀 ' : currentROE >= 10 ? '⚠️ ROE ' + currentROE + '% 中等 ' : '❌ ROE 仅 ' + currentROE + '% '}
-            {currentDY >= 3 ? '✅ 股息率 ' + currentDY + '% ' : 'ℹ️ 股息率 ' + currentDY + '% '}
-            {currentPE > 0 && currentPE <= 15 ? '✅ PE 偏低 ' : currentPE > 0 && currentPE <= 30 ? 'ℹ️ PE 适中 ' : '⚠️ PE 偏高 '}
-            {currentPB < 1 ? '✅ PB 破净 ' : currentPB <= 2 ? 'ℹ️ PB 合理 ' : '⚠️ PB 偏高 '}
-          </div>
-        </div>
-      </div>
-    );
+  const modelWeights = {
+    dcf: (hasStableCF ? 0.4 : 0.25) * dcfConf,
+    pe: (hasIndustryComp ? 0.35 : 0.25) * peConf,
+    gordon: (isHighDividend ? 0.4 : 0.2) * gordonConf,
   };
 
-  const handleAiAddCompany = async () => {
-    if (!searchQuery) return;
-    if (!config.apiKey && !(config.provider === 'gemini' && process.env.GEMINI_API_KEY)) {
-      setAiAddError('请先在设置中配置 AI API Key 才能使用自动添加功能');
-      return;
-    }
-    setIsAddingCompany(true);
-    setAiAddError(null);
-    try {
-      const prompt = `用户想添加一个股票，输入是："${searchQuery}"。
-      请识别这只股票，并返回它的基本信息。
-      必须返回一个合法的 JSON 对象，不要包含任何 markdown 标记（如 \`\`\`json），直接返回 JSON 字符串。
-      JSON 格式如下：
-      {
-        "c": "股票代码(如 600519 或 00700 或 AAPL)",
-        "n": "公司简称",
-        "market": "A" 或 "HK" 或 "GLOBAL",
-        "indName": "所属一级行业名称(如 食品饮料、资讯科技、美股科技)",
-        "subIndName": "所属二级行业名称(如 白酒、互联网、软件)",
-        "pe": 静态市盈率(数字),
-        "pb": 市净率(数字),
-        "roe": 净资产收益率(数字，如 15.5 表示 15.5%),
-        "dy": 股息率(数字，如 2.5 表示 2.5%),
-        "ps": 市销率(数字),
-        "ic": "一个代表该行业的Emoji图标"
-      }`;
-      
-      let text = await getAIResponse(prompt, config, []);
-      
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        text = match[0];
-      }
-      const newComp = JSON.parse(text);
-      newComp.c = (newComp.c || '').trim();
-      newComp.n = (newComp.n || '').trim();
-      
-      const updatedCustom = [...customCompanies, newComp];
-      setCustomCompanies(updatedCustom);
-      localStorage.setItem('iv_custom_comps', JSON.stringify(updatedCustom));
-      
-      setSearchQuery('');
-      setMarket(newComp.market);
-      navigate('comp', newComp.c, newComp.n);
-    } catch (err) {
-      console.error(err);
-      setAiAddError('添加失败，请重试或检查输入是否正确。');
-    } finally {
-      setIsAddingCompany(false);
-    }
+  // 归一化权重
+  const totalWeight = modelWeights.dcf + modelWeights.pe + modelWeights.gordon;
+  if (totalWeight > 0) {
+    modelWeights.dcf /= totalWeight;
+    modelWeights.pe /= totalWeight;
+    modelWeights.gordon /= totalWeight;
+  }
+
+  // 加权合理 PE（过滤异常值）
+  const safeDcfPE = isFinite(dcf.impliedPE) && dcf.impliedPE > 0 && dcf.impliedPE < 1000 ? dcf.impliedPE : 0;
+  const safePePE = isFinite(peRelative.fairPE) && peRelative.fairPE > 0 && peRelative.fairPE < 1000 ? peRelative.fairPE : 0;
+  const safeGordonPE = isFinite(gordon.impliedPE) && gordon.impliedPE > 0 && gordon.impliedPE < 1000 ? gordon.impliedPE : 0;
+
+  const compositeFairPE = safeDcfPE * modelWeights.dcf
+    + safePePE * modelWeights.pe
+    + safeGordonPE * modelWeights.gordon;
+
+  // 加权合理价格
+  const safeDcfPrice = isFinite(dcf.intrinsicValue) && dcf.intrinsicValue > 0 ? dcf.intrinsicValue : 0;
+  const safePePrice = isFinite(peRelative.fairPrice) && peRelative.fairPrice > 0 ? peRelative.fairPrice : 0;
+  const safeGordonPrice = isFinite(gordon.intrinsicValue) && gordon.intrinsicValue > 0 ? gordon.intrinsicValue : 0;
+
+  const compositeFairPrice = safeDcfPrice * modelWeights.dcf
+    + safePePrice * modelWeights.pe
+    + safeGordonPrice * modelWeights.gordon;
+
+  const compositeMargin = data.price > 0 && compositeFairPrice > 0
+    ? ((compositeFairPrice - data.price) / data.price) * 100
+    : 0;
+
+  // 判定
+  let verdict: ValuationSummary['verdict'];
+  let verdictText: string;
+  if (compositeMargin > 30) { verdict = 'deeply_undervalued'; verdictText = '严重低估'; }
+  else if (compositeMargin > 10) { verdict = 'undervalued'; verdictText = '低估'; }
+  else if (compositeMargin > -10) { verdict = 'fair'; verdictText = '合理'; }
+  else if (compositeMargin > -30) { verdict = 'overvalued'; verdictText = '高估'; }
+  else { verdict = 'deeply_overvalued'; verdictText = '严重高估'; }
+
+  return {
+    dcf,
+    peRelative,
+    gordon,
+    compositeFairPE,
+    compositeFairPrice,
+    currentPrice: data.price,
+    compositeMargin,
+    verdict,
+    verdictText,
+    modelWeights,
   };
-
-  const handleAiAddIndex = async () => {
-    if (!searchQuery) return;
-    if (!config.apiKey && !(config.provider === 'gemini' && process.env.GEMINI_API_KEY)) {
-      setAiIndexError('请先在设置中配置 AI API Key 才能使用自动添加功能');
-      return;
-    }
-    setIsAddingIndex(true);
-    setAiIndexError(null);
-    try {
-      const prompt = `用户想添加一个指数，输入是："${searchQuery}"。
-      请识别这个指数，并返回它的基本信息。
-      必须返回一个合法的 JSON 对象，不要包含任何 markdown 标记（如 \`\`\`json），直接返回 JSON 字符串。
-      JSON 格式如下：
-      {
-        "c": "指数代码(如 000300 或 HSI 或 INX)",
-        "n": "指数全称(如 沪深300、恒生指数)",
-        "m": "A" 或 "HK" 或 "GLOBAL",
-        "mk": "东方财富市场代码(A股: 上交所1 深交所0, 港股: 116, 美股/全球: 100)"
-      }`;
-
-      let text = await getAIResponse(prompt, config, []);
-
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        text = match[0];
-      }
-      const newIdx = JSON.parse(text);
-      newIdx.c = (newIdx.c || '').trim();
-      newIdx.n = (newIdx.n || '').trim();
-      newIdx.m = newIdx.m || 'A';
-      newIdx.mk = newIdx.mk || '1';
-
-      if (!indices.find(i => i.c === newIdx.c)) {
-        const newIndices = [...indices, newIdx];
-        setIndices(newIndices);
-        localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-      }
-
-      setSearchQuery('');
-      setIndexMarket(newIdx.m);
-      navigate('index_detail', newIdx);
-    } catch (err) {
-      console.error(err);
-      setAiIndexError('添加失败，请重试或检查输入是否正确。');
-    } finally {
-      setIsAddingIndex(false);
-    }
-  };
-
-
-  const renderAI = () => {
-    const activeConv = aiConversations.find(c => c.id === activeAiConvId);
-    const messages = activeConv?.messages || [];
-
-    const handleNewConversation = () => {
-      const newConv: ChatConversation = {
-        id: `conv_${Date.now()}`,
-        title: '新对话',
-        messages: [],
-        createdAt: Date.now(),
-      };
-      setAiConversations(prev => [newConv, ...prev]);
-      setActiveAiConvId(newConv.id);
-      setShowAiConvList(false);
-    };
-
-    const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      const updated = aiConversations.filter(c => c.id !== id);
-      setAiConversations(updated);
-      if (activeAiConvId === id) {
-        setActiveAiConvId(updated.length > 0 ? updated[0].id : null);
-      }
-    };
-
-    const handleSend = async (e?: React.FormEvent) => {
-      e?.preventDefault();
-      const input = (document.getElementById('aiIn') as HTMLInputElement).value.trim();
-      if (!input || aiLoading) return;
-
-      // 如果没有活跃对话，先创建一个
-      let convId = activeAiConvId;
-      if (!convId) {
-        const newConv: ChatConversation = {
-          id: `conv_${Date.now()}`,
-          title: input.slice(0, 20) + (input.length > 20 ? '...' : ''),
-          messages: [],
-          createdAt: Date.now(),
-        };
-        setAiConversations(prev => [newConv, ...prev]);
-        setActiveAiConvId(newConv.id);
-        convId = newConv.id;
-      }
-
-      const userMsg: ChatMessage = { role: 'user', content: input };
-      setAiConversations(prev => prev.map(c =>
-        c.id === convId ? { ...c, messages: [...c.messages, userMsg], title: c.messages.length === 0 ? input.slice(0, 20) + (input.length > 20 ? '...' : '') : c.title } : c
-      ));
-      (document.getElementById('aiIn') as HTMLInputElement).value = '';
-      setAiLoading(true);
-
-      try {
-        const conv = aiConversations.find(c => c.id === convId);
-        const historyForApi = (conv?.messages || []).map(m => ({ role: m.role, content: m.content }));
-        const response = await getAIResponse(input, config, historyForApi);
-        const aiMsg: ChatMessage = { role: 'assistant', content: response || 'AI 未能生成回复' };
-        setAiConversations(prev => prev.map(c =>
-          c.id === convId ? { ...c, messages: [...c.messages, aiMsg] } : c
-        ));
-      } catch (error: any) {
-        const errMsg: ChatMessage = { role: 'assistant', content: `❌ 错误: ${error.message}` };
-        setAiConversations(prev => prev.map(c =>
-          c.id === convId ? { ...c, messages: [...c.messages, errMsg] } : c
-        ));
-      } finally {
-        setAiLoading(false);
-      }
-    };
-
-    return (
-      <div className="flex flex-col" style={{ height: 'calc(100dvh - 56px)' }}>
-        {/* AI 页面头部 */}
-        <div className="flex items-center justify-between px-1 pb-3">
-          <div className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--color-text-muted)' }}>
-            {config.apiKey ? `${config.provider}` : '未配置 API'}
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleNewConversation}
-              className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-500 transition-all"
-              title="新建对话"
-            >
-              <MessageSquarePlus size={18} />
-            </button>
-            <button
-              onClick={() => setShowAiConvList(true)}
-              className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-500 transition-all"
-              title="对话记录"
-            >
-              <MoreVertical size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* 消息区域 */}
-        <div className="flex-1 overflow-y-auto space-y-3 pb-4 px-1 no-scrollbar" id="aiMsgs">
-          {messages.length === 0 && (
-            <div className="text-center pt-20 space-y-4">
-              <div className="w-16 h-16 bg-brand-50 rounded-2xl flex items-center justify-center mx-auto text-brand-500 shadow-glow-sm">
-                <Bot size={28} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-700 mb-1">AI 投资助手</div>
-                <div className="text-xs text-slate-400 max-w-[240px] mx-auto">问我关于行业趋势或公司估值的问题</div>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2 pt-2 px-4">
-                {['分析白酒行业估值', '宁德时代值得投资吗', '什么是安全边际'].map(q => (
-                  <button
-                    key={q}
-                    onClick={() => {
-                      (document.getElementById('aiIn') as HTMLInputElement).value = q;
-                      handleSend();
-                    }}
-                    className="text-[11px] px-3 py-1.5 rounded-full bg-white border border-slate-200/60 text-slate-500 font-medium active:scale-95 transition-all hover:border-brand-300 hover:text-brand-600"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-4 py-2.5 text-[13px] leading-relaxed ${
-                m.role === 'user' ? 'chat-bubble-user text-white' : 'chat-bubble-ai text-slate-700'
-              }`}>
-                {m.content}
-              </div>
-            </div>
-          ))}
-          {aiLoading && (
-            <div className="flex justify-start">
-              <div className="chat-bubble-ai px-4 py-2.5 text-slate-400 flex items-center gap-2 text-[13px]">
-                <Loader2 size={15} className="animate-spin" /> 思考中...
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 输入栏 */}
-        <form onSubmit={handleSend} className="flex gap-2 mt-2">
-          <input
-            id="aiIn"
-            className="input-field flex-1 rounded-2xl py-3"
-            placeholder="问问 AI..."
-            disabled={aiLoading}
-          />
-          <button
-            type="submit"
-            disabled={aiLoading}
-            className="btn-primary p-3 rounded-2xl disabled:opacity-40"
-          >
-            <Send size={18} />
-          </button>
-        </form>
-
-        {/* 对话记录弹窗 */}
-        <AnimatePresence>
-          {showAiConvList && (
-            <div className="fixed inset-0 z-[100] flex items-end justify-center">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setShowAiConvList(false)}
-                className="absolute inset-0 modal-overlay"
-              />
-              <motion.div
-                initial={{ y: '100%' }}
-                animate={{ y: 0 }}
-                exit={{ y: '100%' }}
-                transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-                className="relative w-full max-w-lg modal-sheet p-5 pb-[calc(20px+env(safe-area-inset-bottom))]"
-              >
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-5" />
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-extrabold text-slate-900">对话记录</h3>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={handleNewConversation}
-                      className="btn-primary px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                    >
-                      <Plus size={14} /> 新建
-                    </button>
-                    <button
-                      onClick={() => setShowAiConvList(false)}
-                      className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 transition-all"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                  {aiConversations.length === 0 && (
-                    <div className="text-center py-12 text-slate-400 text-sm">
-                      暂无对话记录
-                    </div>
-                  )}
-                  {aiConversations.map(conv => (
-                    <div
-                      key={conv.id}
-                      onClick={() => {
-                        setActiveAiConvId(conv.id);
-                        setShowAiConvList(false);
-                      }}
-                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
-                        conv.id === activeAiConvId ? 'bg-brand-50 border border-brand-200' : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        conv.id === activeAiConvId ? 'bg-brand-100 text-brand-600' : 'bg-slate-100 text-slate-400'
-                      }`}>
-                        <MessageSquare size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-bold text-slate-800 truncate">{conv.title}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          {conv.messages.length} 条消息 · {new Date(conv.createdAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteConversation(conv.id, e)}
-                        className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all flex-shrink-0"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-      </div>
-    );
-  };
-
-  const renderIndex = (indIdx: number, indexCode: string) => {
-    const ind = currentIndustries[indIdx];
-    if (!ind) return null;
-    const indexInfo = (ind.indices || []).find(idx => idx.c === indexCode);
-    if (!indexInfo) return null;
-
-    const indexObj: Index = {
-      c: indexInfo.c,
-      n: indexInfo.n,
-      m: (ind.market === 'HK' ? 'HK' : 'A') as 'A' | 'HK' | 'GLOBAL',
-    };
-
-    return (
-      <IndexDetailView
-        idx={indexObj}
-        batchData={batchData}
-        indexVal={indexVal}
-        setView={setView}
-        toggleFav={toggleFav}
-        favIndices={favIndices}
-        breadcrumbNodes={
-          <>
-            <button onClick={() => setView('home')} className="breadcrumb-link">全部</button>
-            <ChevronRight size={12} />
-            <button onClick={() => navigate('ind', indIdx)} className="breadcrumb-link">{ind.nm}</button>
-            <ChevronRight size={12} />
-            <span>{indexInfo.n}</span>
-          </>
-        }
-      />
-    );
-  };
-
-  const renderIndexList = () => {
-    const filtered = indices.filter(idx => {
-      const iv = indexVal[idx.c];
-      const pePct = (iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50;
-      const status = pePct < 30 ? 'low' : pePct > 70 ? 'high' : 'mid';
-      
-      const marketMatch = idx.m === indexMarket;
-      const filterMatch = indexValFilter === 'all' || indexValFilter === status;
-      
-      return marketMatch && filterMatch;
-    });
-
-    return (
-      <div className="space-y-4">
-        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
-          {(['A', 'HK', 'GLOBAL'] as const).map(m => (
-            <button
-              key={m}
-              onClick={() => setIndexMarket(m)}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${
-                indexMarket === m ? 'tab-pill-active' : 'tab-pill-inactive'
-              }`}
-            >
-              {m === 'A' ? 'A股指数' : m === 'HK' ? '港股指数' : '国外指数'}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card overflow-x-auto">
-          {(['all', 'low', 'mid', 'high'] as const).map(f => (
-            <button
-              key={f}
-              onClick={() => setIndexValFilter(f)}
-              className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all duration-200 whitespace-nowrap ${
-                indexValFilter === f ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'
-              }`}
-            >
-              {f === 'all' ? '全部' : f === 'low' ? '低估' : f === 'mid' ? '适中' : '高估'}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-3">
-          {filtered.map(idx => {
-            const bd = batchData[idx.c];
-            const iv = indexVal[idx.c];
-            const pePct = (iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50;
-            const status = pePct < 30 ? 'low' : pePct > 70 ? 'high' : 'mid';
-
-            return (
-              <motion.div
-                layout
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                key={idx.c}
-                onClick={() => navigate('index_detail', idx)}
-                className="card-interactive p-4"
-              >
-                {/* Row 1: name + code + badge + actions */}
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{idx.c}</span>
-                    {iv?.evaType && (
-                      <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
-                        {evText(iv.evaType)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmDialog({
-                          title: '删除指数',
-                          message: `确定删除 "${idx.n}" 吗？`,
-                          onConfirm: () => {
-                            const newIndices = indices.filter(i => i.c !== idx.c);
-                            setIndices(newIndices);
-                            localStorage.setItem('iv_indices', JSON.stringify(newIndices));
-                            setConfirmDialog(null);
-                          }
-                        });
-                      }}
-                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFav(idx.c, 'index', e);
-                      }}
-                      className="p-2 text-amber-400 transition-colors"
-                    >
-                      {favIndices.includes(idx.c) ? <Star fill="currentColor" size={18} /> : <Star size={18} />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Row 2: price + change */}
-                <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                  {bd?.cp && (
-                    <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
-                    </span>
-                  )}
-                </div>
-
-                {/* Row 3: PE% / ROE / 股息率 */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">PE%</div>
-                    <div className="stat-value">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(2)}%` : '—'}</div>
-                  </div>
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">ROE</div>
-                    <div className="stat-value">{iv?.roe !== undefined ? `${(iv.roe * 100).toFixed(2)}%` : '—'}</div>
-                  </div>
-                  <div className="stat-cell py-2">
-                    <div className="stat-label">股息率</div>
-                    <div className="stat-value">{iv?.dy !== undefined ? `${(iv.dy * 100).toFixed(2)}%` : '—'}</div>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const [favTab, setFavTab] = useState<'stocks' | 'indices'>('stocks');
-  const [dragMode, setDragMode] = useState(false);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const reorderFavStocks = (fromIdx: number, toIdx: number) => {
-    // Build ordered results matching favStocks order
-    const ordered: { code: string; market: string }[] = [];
-    favStocks.forEach(code => {
-      for (const ind of allIndustries) {
-        for (const s of ind.l2) {
-          const found = (s.cs || []).find(c => c.c === code);
-          if (found) { ordered.push({ code, market: ind.market || 'A' }); break; }
-        }
-      }
-      // Also check customCompanies
-      const custom = customCompanies.find(c => c.c === code);
-      if (custom && !ordered.find(o => o.code === code)) {
-        ordered.push({ code, market: custom.market || 'A' });
-      }
-    });
-    if (fromIdx < 0 || fromIdx >= ordered.length || toIdx < 0 || toIdx >= ordered.length) return;
-    const item = ordered.splice(fromIdx, 1)[0];
-    ordered.splice(toIdx, 0, item);
-    setFavStocks(ordered.map(o => o.code));
-  };
-
-  const reorderFavIndices = (fromIdx: number, toIdx: number) => {
-    const ordered = favIndices.filter(c => indices.find(i => i.c === c));
-    if (fromIdx < 0 || fromIdx >= ordered.length || toIdx < 0 || toIdx >= ordered.length) return;
-    const item = ordered.splice(fromIdx, 1)[0];
-    ordered.splice(toIdx, 0, item);
-    setFavIndices(ordered);
-  };
-
-  const handleLongPressStart = (e: React.PointerEvent, idx: number) => {
-    if (dragMode) return;
-    longPressTimer.current = setTimeout(() => {
-      setDragMode(true);
-      setDragIdx(idx);
-      if ('vibrate' in navigator) navigator.vibrate(30);
-    }, 500);
-  };
-
-  const handleLongPressEnd = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-
-  const handleFavDragEnd = (fromIdx: number, info: any, isStock: boolean) => {
-    const itemHeight = 120; // approximate card height
-    const toOffset = Math.round(info.offset.y / itemHeight);
-    const toIdx = Math.max(0, Math.min(fromIdx + toOffset, (isStock ? favStocks.length : favIndices.length) - 1));
-    if (fromIdx !== toIdx) {
-      if (isStock) reorderFavStocks(fromIdx, toIdx);
-      else reorderFavIndices(fromIdx, toIdx);
-    }
-    setDragIdx(null);
-    setDragMode(false);
-  };
-
-  const renderFavStocks = () => {
-    // Build results in favStocks order
-    const results: any[] = [];
-    favStocks.forEach(code => {
-      let found = false;
-      allIndustries.forEach(ind => ind.l2.forEach(s => (s.cs || []).forEach(c => {
-        if (c.c === code && !found) {
-          results.push({ ...c, sn: s.nm, ic: ind.ic, nm: ind.nm, market: ind.market || 'A' });
-          found = true;
-        }
-      })));
-      if (!found) {
-        const custom = customCompanies.find(x => x.c === code);
-        if (custom) results.push({ ...custom, sn: custom.subIndName, ic: custom.ic || '🏢', nm: custom.indName || '自定义', market: custom.market || 'A' });
-      }
-    });
-
-    return (
-      <div className="space-y-3">
-        {results.length > 0 ? results.map((c, i) => (
-          <motion.div
-            key={`${c.market}-${c.c}`}
-            layout
-            drag={dragMode ? "y" : false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={0.5}
-            onDragEnd={(_, info) => handleFavDragEnd(i, info, true)}
-            onPointerDown={(e) => handleLongPressStart(e, i)}
-            onPointerUp={handleLongPressEnd}
-            onPointerLeave={handleLongPressEnd}
-            onClick={() => { if (!dragMode) { setMarket(c.market || 'A'); navigate('comp', c.c, c.n); } }}
-            className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''} ${selectMode && selectedItems.has(c.c) ? 'ring-2 ring-brand-500 bg-brand-50/30' : ''}`}
-            style={{ touchAction: dragMode ? 'none' : 'auto' }}
-          >
-            {dragMode && (
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-300">
-                <GripVertical size={16} />
-              </div>
-            )}
-            <div className={`flex justify-between items-start mb-2.5 ${dragMode ? 'pl-5' : ''}`}>
-              <div>
-                <div className="text-[13px] font-bold text-slate-900">{c.n}</div>
-                <div className="text-[10px] text-slate-400 font-mono mt-0.5">{c.c} · {c.sn}</div>
-              </div>
-              <div className="flex items-center gap-1">
-                {batchData[c.c] && batchData[c.c].p && !selectMode && (
-                  <div className="text-right">
-                    <div className="text-[13px] font-bold text-slate-900 tabular-nums">¥{batchData[c.c].p}</div>
-                    <div className={`text-[10px] font-bold tabular-nums ${parseFloat(batchData[c.c].cp || '0') >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {parseFloat(batchData[c.c].cp || '0') >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(batchData[c.c].cp || '0')).toFixed(2)}%
-                    </div>
-                  </div>
-                )}
-                {selectMode ? (
-                  <button onClick={(e) => { e.stopPropagation(); toggleSelectItem(c.c); }} className="p-1.5">
-                    {selectedItems.has(c.c)
-                      ? <CheckSquare size={20} className="text-brand-500" />
-                      : <Square size={20} className="text-slate-300" />
-                    }
-                  </button>
-                ) : (
-                  <button onClick={(e) => { e.stopPropagation(); handleSingleUnfav(c.c, c.n, 'stock'); }} className="p-1.5 text-amber-400 ml-1">
-                    <Star fill="currentColor" size={18} />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {[
-                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
-                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
-              ].map(m => (
-                <div key={m.l} className="stat-cell py-1.5">
-                  <div className="stat-label text-[7px]">{m.l}</div>
-                  <div className="text-[10px] font-bold text-slate-700 tabular-nums">{m.v}</div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )) : (
-          <div className="text-center py-20 space-y-4">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-300">
-              <Star size={32} />
-            </div>
-            <div className="text-sm text-slate-400">暂无自选股<br />在公司详情页点击 ☆ 添加</div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderFavIndices = () => {
-    const results = favIndices.map(code => indices.find(i => i.c === code)).filter(Boolean) as Index[];
-
-    return (
-      <div className="space-y-3">
-        {results.length > 0 ? results.map((idx, i) => {
-          const bd = batchData[idx.c];
-          const iv = indexVal[idx.c];
-          const pePct = (iv?.pePct !== undefined ? iv.pePct * 100 : idx.pePct) || 50;
-          const status = pePct < 30 ? 'low' : pePct > 70 ? 'high' : 'mid';
-
-          return (
-            <motion.div
-              key={idx.c}
-              layout
-              drag={dragMode ? "y" : false}
-              dragConstraints={{ top: 0, bottom: 0 }}
-              dragElastic={0.5}
-              onDragEnd={(_, info) => handleFavDragEnd(i, info, false)}
-              onPointerDown={(e) => handleLongPressStart(e, i)}
-              onPointerUp={handleLongPressEnd}
-              onPointerLeave={handleLongPressEnd}
-              onClick={() => { if (!dragMode) navigate('index_detail', idx); }}
-              className={`card-interactive p-4 relative ${dragMode ? 'ring-2 ring-brand-300 ring-dashed' : ''} ${selectMode && selectedItems.has(idx.c) ? 'ring-2 ring-brand-500 bg-brand-50/30' : ''}`}
-              style={{ touchAction: dragMode ? 'none' : 'auto' }}
-            >
-              {dragMode && (
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-300">
-                  <GripVertical size={16} />
-                </div>
-              )}
-              <div className={`flex justify-between items-center mb-2 ${dragMode ? 'pl-5' : ''}`}>
-                <div className="flex items-center gap-2">
-                  <span className="text-[15px] font-extrabold text-slate-900">{idx.n}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{idx.c}</span>
-                  {iv?.evaType && !selectMode && (
-                    <span className={`badge ${iv.evaType === 'low' ? 'val-low' : iv.evaType === 'mid' ? 'val-mid' : 'val-high'}`}>
-                      {evText(iv.evaType)}
-                    </span>
-                  )}
-                </div>
-                {selectMode ? (
-                  <button onClick={(e) => { e.stopPropagation(); toggleSelectItem(idx.c); }} className="p-1.5">
-                    {selectedItems.has(idx.c)
-                      ? <CheckSquare size={20} className="text-brand-500" />
-                      : <Square size={20} className="text-slate-300" />
-                    }
-                  </button>
-                ) : (
-                  <button onClick={(e) => { e.stopPropagation(); handleSingleUnfav(idx.c, idx.n, 'index'); }} className="p-1.5 text-amber-400">
-                    <Star fill="currentColor" size={18} />
-                  </button>
-                )}
-              </div>
-              <div className="flex items-baseline gap-2 mb-3">
-                <span className="text-lg font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                {bd?.cp && (
-                  <span className={`text-xs font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                    {parseFloat(bd.cp) >= 0 ? '+' : ''}{bd.cp}%
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="stat-cell py-2">
-                  <div className="stat-label">PE%</div>
-                  <div className="stat-value">{iv?.pePct !== undefined ? `${(iv.pePct * 100).toFixed(2)}%` : '—'}</div>
-                </div>
-                <div className="stat-cell py-2">
-                  <div className="stat-label">ROE</div>
-                  <div className="stat-value">{iv?.roe !== undefined ? `${(iv.roe * 100).toFixed(2)}%` : '—'}</div>
-                </div>
-                <div className="stat-cell py-2">
-                  <div className="stat-label">股息率</div>
-                  <div className="stat-value">{iv?.dy !== undefined ? `${(iv.dy * 100).toFixed(2)}%` : '—'}</div>
-                </div>
-              </div>
-            </motion.div>
-          );
-        }) : (
-          <div className="text-center py-20 space-y-4">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-300">
-              <Star size={32} />
-            </div>
-            <div className="text-sm text-slate-400">暂无自选指数<br />在指数详情页点击 ☆ 添加</div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const handleBatchUnfav = () => {
-    if (selectedItems.size === 0) return;
-    setConfirmDialog({
-      title: '取消收藏',
-      message: `确定取消收藏选中的 ${selectedItems.size} 项吗？`,
-      onConfirm: () => {
-        if (favTab === 'stocks') {
-          setFavStocks(prev => prev.filter(c => !selectedItems.has(c)));
-        } else {
-          setFavIndices(prev => prev.filter(c => !selectedItems.has(c)));
-        }
-        setSelectedItems(new Set());
-        setSelectMode(false);
-        setConfirmDialog(null);
-      }
-    });
-  };
-
-  const toggleSelectItem = (code: string) => {
-    setSelectedItems(prev => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  };
-
-  const handleSingleUnfav = (code: string, name: string, type: 'stock' | 'index') => {
-    setConfirmDialog({
-      title: '取消收藏',
-      message: `确定取消收藏 "${name}" 吗？`,
-      onConfirm: () => {
-        toggleFav(code, type);
-        setConfirmDialog(null);
-      }
-    });
-  };
-
-  const renderFav = () => {
-    const totalItems = favTab === 'stocks' ? favStocks.length : favIndices.length;
-    return (
-      <div className="space-y-4">
-        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card items-center">
-          <button onClick={() => { setFavTab('stocks'); setSelectMode(false); setSelectedItems(new Set()); }} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'stocks' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选股</button>
-          <button onClick={() => { setFavTab('indices'); setSelectMode(false); setSelectedItems(new Set()); }} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-200 ${favTab === 'indices' ? 'tab-pill-active' : 'tab-pill-inactive'}`}>自选指数</button>
-          <button
-            onClick={() => { if (dragMode) { setDragMode(false); } else { setSelectMode(!selectMode); setSelectedItems(new Set()); } }}
-            className={`ml-1.5 p-2 rounded-xl transition-all duration-200 ${selectMode ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
-            title="多选"
-          >
-            <CheckSquare size={16} />
-          </button>
-          <button
-            onClick={() => { if (selectMode) { setSelectMode(false); setSelectedItems(new Set()); } else { setDragMode(!dragMode); } }}
-            className={`ml-1 p-2 rounded-xl transition-all duration-200 ${dragMode ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
-            title="排序"
-          >
-            <GripVertical size={16} />
-          </button>
-        </div>
-        {dragMode && (
-          <div className="text-center text-[11px] text-brand-500 font-medium py-1">
-            长按或拖拽卡片可调整顺序
-          </div>
-        )}
-        {selectMode && (
-          <div className="flex items-center justify-between px-1">
-            <button
-              onClick={() => {
-                if (selectedItems.size === totalItems) {
-                  setSelectedItems(new Set());
-                } else {
-                  const allCodes = favTab === 'stocks' ? new Set(favStocks) : new Set(favIndices);
-                  setSelectedItems(allCodes);
-                }
-              }}
-              className="text-xs text-brand-500 font-bold"
-            >
-              {selectedItems.size === totalItems ? '取消全选' : '全选'}
-            </button>
-            <span className="text-[11px] text-slate-400">已选 {selectedItems.size} 项</span>
-          </div>
-        )}
-        {favTab === 'stocks' ? renderFavStocks() : renderFavIndices()}
-        {selectMode && selectedItems.size > 0 && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="fixed bottom-20 left-4 right-4 z-50"
-          >
-            <button
-              onClick={handleBatchUnfav}
-              className="w-full py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-            >
-              <Star size={16} />
-              取消收藏 ({selectedItems.size})
-            </button>
-          </motion.div>
-        )}
-      </div>
-    );
-  };
-
-  // ─── 设置页面 ───
-  const renderSettings = () => {
-    // 更新估值参数的辅助函数
-    const updateDCF = (key: string, val: number) => {
-      const newCfg = { ...valuationConfig, dcf: { ...valuationConfig.dcf, [key]: val } };
-      setValuationConfig(newCfg);
-      setActivePreset(null);
-      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
-      localStorage.removeItem('iv_val_preset');
-    };
-    const updatePE = (key: string, val: number) => {
-      const newCfg = { ...valuationConfig, pe: { ...valuationConfig.pe, [key]: val } };
-      setValuationConfig(newCfg);
-      setActivePreset(null);
-      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
-      localStorage.removeItem('iv_val_preset');
-    };
-    const updateGordon = (key: string, val: number) => {
-      const newCfg = { ...valuationConfig, gordon: { ...valuationConfig.gordon, [key]: val } };
-      setValuationConfig(newCfg);
-      setActivePreset(null);
-      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
-      localStorage.removeItem('iv_val_preset');
-    };
-    const applyPreset = (name: PresetName) => {
-      const cfg = VALUATION_PRESETS[name].config;
-      setValuationConfig(cfg);
-      setActivePreset(name);
-      localStorage.setItem('iv_val_cfg', JSON.stringify(cfg));
-      localStorage.setItem('iv_val_preset', name);
-    };
-
-    // 滑块组件
-    const Slider = ({ label, value, min, max, step, unit, onChange, desc }: {
-      label: string; value: number; min: number; max: number; step: number;
-      unit: string; onChange: (v: number) => void; desc?: string;
-    }) => (
-      <div className="space-y-1">
-        <div className="flex justify-between items-center">
-          <span className="text-xs text-slate-600 font-medium">{label}</span>
-          <span className="text-xs font-mono font-bold text-indigo-600">{(value * (unit === '%' ? 100 : 1)).toFixed(unit === '%' ? 1 : 2)}{unit}</span>
-        </div>
-        <input type="range" min={min} max={max} step={step} value={value}
-          onChange={e => onChange(parseFloat(e.target.value))}
-          className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-500"
-        />
-        {desc && <div className="text-[9px] text-slate-400">{desc}</div>}
-      </div>
-    );
-
-    return (
-      <div className="space-y-5">
-        {/* Tab 切换 */}
-        <div className="flex bg-white/80 border border-slate-200/60 rounded-2xl p-1 shadow-card">
-          {(['ai', 'data', 'valuation'] as const).map(tab => (
-            <button key={tab} onClick={() => setSettingsTab(tab)}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${settingsTab === tab ? 'tab-pill-active' : 'tab-pill-inactive'}`}>
-              {tab === 'ai' ? '🤖 AI' : tab === 'data' ? '📊 数据' : '📐 估值模型'}
-            </button>
-          ))}
-        </div>
-
-        {/* AI 设置 */}
-        {settingsTab === 'ai' && (
-          <div className="space-y-5">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">AI 服务商</label>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(PROVIDERS).map(([id, p]) => (
-                  <button key={id}
-                    onClick={() => setConfig({ ...config, provider: id, apiUrl: config.apiUrl === '' || Object.values(PROVIDERS).some(prov => prov.url === config.apiUrl) ? p.url : config.apiUrl, model: p.model })}
-                    className={`p-3 rounded-xl text-left transition-all ${config.provider === id ? 'border-2 border-brand-500 bg-brand-50' : 'border border-slate-200/80 bg-surface'}`}>
-                    <div className={`text-sm font-bold ${config.provider === id ? 'text-brand-700' : 'text-slate-700'}`}>{p.name}</div>
-                    <div className="text-[10px] text-slate-400">{p.model}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">API 地址</label>
-                <input className="input-field" value={config.apiUrl} placeholder={PROVIDERS[config.provider]?.url} onChange={e => setConfig({ ...config, apiUrl: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">API Key</label>
-                <input type="password" className="input-field" placeholder="sk-xxxxxxxx" value={config.apiKey} onChange={e => setConfig({ ...config, apiKey: e.target.value })} />
-                <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><AlertCircle size={10} /> 仅保存在本地浏览器</p>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">模型名称</label>
-                <input className="input-field" value={config.model} onChange={e => setConfig({ ...config, model: e.target.value })} />
-              </div>
-            </div>
-            <button onClick={() => { setConfig(DEFAULT_CONFIG); localStorage.removeItem('iv_cfg'); }}
-              className="btn-secondary w-full py-3">恢复 AI 默认设置</button>
-          </div>
-        )}
-
-        {/* 数据设置 */}
-        {settingsTab === 'data' && (
-          <div className="space-y-4">
-            <div className="p-4 bg-slate-50 rounded-2xl space-y-2">
-              <div className="text-[10px] font-bold text-slate-400 uppercase">数据来源</div>
-              <div className="text-xs text-slate-600">实时行情 & 财务数据来自东方财富，每 10 秒自动刷新。</div>
-            </div>
-            <button onClick={() => setConfirmDialog({ title: '恢复公司数据', message: '将清除所有自定义公司，恢复初始状态。', onConfirm: () => { handleRestoreDefaults(); setConfirmDialog(null); } })}
-              className="btn-danger w-full py-3 flex items-center justify-center gap-2">
-              <Trash2 size={15} /> 恢复默认公司数据
-            </button>
-            <button onClick={handleRestoreDefaultIndices}
-              className="w-full py-3 flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 text-amber-600 font-bold rounded-2xl">
-              <RotateCcw size={15} /> 恢复默认指数数据
-            </button>
-          </div>
-        )}
-
-        {/* 估值模型设置 */}
-        {settingsTab === 'valuation' && (
-          <div className="space-y-5">
-            {/* 预设方案 */}
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">预设方案</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(Object.entries(VALUATION_PRESETS) as [PresetName, typeof VALUATION_PRESETS[PresetName]][]).map(([key, preset]) => (
-                  <button key={key} onClick={() => applyPreset(key)}
-                    className={`p-3 rounded-xl text-left transition-all ${activePreset === key ? 'border-2 border-indigo-500 bg-indigo-50' : 'border border-slate-200/80 bg-surface'}`}>
-                    <div className={`text-sm font-bold ${activePreset === key ? 'text-indigo-700' : 'text-slate-700'}`}>{preset.name}</div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">{preset.desc}</div>
-                  </button>
-                ))}
-              </div>
-              {activePreset === null && <div className="text-[10px] text-amber-500 mt-2 font-medium">⚠️ 自定义参数</div>}
-            </div>
-
-            {/* DCF 参数 */}
-            <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">① DCF 现金流折现</h3>
-              <Slider label="无风险利率 Rf" value={valuationConfig.dcf.rf} min={0.01} max={0.06} step={0.005} unit="%" onChange={v => updateDCF('rf', v)} desc="10 年期国债收益率" />
-              <Slider label="股权风险溢价 ERP" value={valuationConfig.dcf.erp} min={0.03} max={0.10} step={0.005} unit="%" onChange={v => updateDCF('erp', v)} desc="股票相对无风险资产的额外回报" />
-              <Slider label="永续增长率 g" value={valuationConfig.dcf.terminalGrowth} min={0.01} max={0.05} step={0.005} unit="%" onChange={v => updateDCF('terminalGrowth', v)} desc="长期名义 GDP 增速" />
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-600">预测年数</span>
-                <div className="flex gap-1">
-                  {[5, 8, 10].map(y => (
-                    <button key={y} onClick={() => updateDCF('projectionYears', y)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold ${valuationConfig.dcf.projectionYears === y ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      {y}年
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* PE 相对估值参数 */}
-            <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">② PE 相对估值</h3>
-              <Slider label="ROE 基准值" value={valuationConfig.pe.roeBase} min={0.08} max={0.25} step={0.01} unit="%" onChange={v => updatePE('roeBase', v)} desc="ROE 达到此值可享行业平均 PE" />
-              <Slider label="行业 PE 权重" value={valuationConfig.pe.industryWeight} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updatePE('industryWeight', v)} />
-              <Slider label="历史 PE 权重" value={valuationConfig.pe.historicalWeight} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updatePE('historicalWeight', v)} />
-              <Slider label="增长权重 (PEG)" value={valuationConfig.pe.growthWeight} min={0.1} max={0.5} step={0.05} unit="" onChange={v => updatePE('growthWeight', v)} />
-            </div>
-
-            {/* Gordon 参数 */}
-            <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">③ Gordon 股利折现</h3>
-              <Slider label="增长率上限" value={valuationConfig.gordon.maxGrowthRate} min={0.03} max={0.20} step={0.01} unit="%" onChange={v => updateGordon('maxGrowthRate', v)} desc="股利永续增长率上限" />
-              <Slider label="默认分红比例" value={valuationConfig.gordon.defaultPayoutRatio} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updateGordon('defaultPayoutRatio', v)} desc="无数据时的分红比例假设" />
-            </div>
-
-            <button onClick={() => applyPreset('neutral')} className="btn-secondary w-full py-3">恢复默认参数</button>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div className={`min-h-screen bg-surface pb-24 ${darkMode ? 'text-slate-100' : ''}`}>
-      {/* Top Bar */}
-      <div className="sticky top-0 z-50 nav-glass px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          {navStack.length > 0 && view !== 'home' && (
-            <button onClick={goBack} className="p-1.5 -ml-1 rounded-xl text-slate-500 hover:bg-slate-100/60 active:scale-90 transition-all">
-              <ArrowLeft size={20} strokeWidth={2.5} />
-            </button>
-          )}
-          <h1 className="text-[15px] font-extrabold text-slate-900 tracking-tight">
-            {view === 'home' ? '📊 行业估值' : 
-             view === 'ind' ? currentIndustries[navArgs[0]].nm :
-             view === 'sub' ? currentIndustries[navArgs[0]].l2[navArgs[1]].nm :
-             view === 'comp' ? navArgs[1] :
-             view === 'search' ? '搜索' :
-             view === 'ai' ? 'AI 助手' : 
-             view === 'index' ? '指数详情' : 
-             view === 'index_list' ? '指数行情' :
-             view === 'index_detail' ? '指数详情' :
-             view === 'settings' ? '设置' : '自选股'}
-          </h1>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
-            {darkMode ? <Sun size={19} strokeWidth={2} /> : <Moon size={19} strokeWidth={2} />}
-          </button>
-          <button onClick={() => navigate('settings')} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100/60 hover:text-brand-600 transition-all dark:hover:bg-slate-700/60">
-            <Settings size={19} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <main className="max-w-lg mx-auto p-4">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={view + (navArgs[0] || '')}
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -10 }}
-            transition={{ duration: 0.15 }}
-          >
-            {view === 'home' && renderHome()}
-            {view === 'ind' && renderInd(navArgs[0])}
-            {view === 'sub' && renderSub(navArgs[0], navArgs[1])}
-            {view === 'comp' && renderComp(navArgs[0], navArgs[1])}
-            {view === 'search' && (
-              <SearchView
-                allIndustries={allIndustries}
-                customCompanies={customCompanies}
-                indices={indices}
-                setIndices={setIndices}
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                navigate={navigate}
-                setMarket={setMarket}
-                setIndexMarket={setIndexMarket}
-                handleAiAddCompany={handleAiAddCompany}
-                isAddingCompany={isAddingCompany}
-                aiAddError={aiAddError}
-                handleAiAddIndex={handleAiAddIndex}
-                isAddingIndex={isAddingIndex}
-                aiIndexError={aiIndexError}
-              />
-            )}
-            {view === 'ai' && renderAI()}
-            {view === 'fav' && renderFav()}
-            {view === 'settings' && renderSettings()}
-            {view === 'index' && renderIndex(navArgs[0], navArgs[1])}
-            {view === 'index_list' && renderIndexList()}
-            {view === 'index_detail' && (
-              <IndexDetailView
-                idx={navArgs[0]}
-                batchData={batchData}
-                indexVal={indexVal}
-                setView={setView}
-                toggleFav={toggleFav}
-                favIndices={favIndices}
-              />
-            )}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-
-      {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 nav-bottom-glass flex justify-around items-center py-1.5 px-4 pb-[calc(6px+env(safe-area-inset-bottom))] z-50">
-        {[
-          { id: 'home', l: '行业', i: LayoutGrid },
-          { id: 'index_list', l: '指数', i: TrendingUp },
-          { id: 'search', l: '搜索', i: Search },
-          { id: 'ai', l: 'AI助手', i: Bot },
-          { id: 'fav', l: '自选', i: Star },
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => { setView(t.id as ViewType); setNavStack([]); setNavArgs([]); }}
-            className={`flex flex-col items-center gap-0.5 flex-1 py-1.5 rounded-xl transition-all duration-200 ${
-              view === t.id ? 'text-brand-600' : 'text-slate-400'
-            }`}
-          >
-            <div className={`p-1 rounded-lg transition-all duration-200 ${view === t.id ? 'bg-brand-50' : ''}`}>
-              <t.i size={19} strokeWidth={view === t.id ? 2.5 : 1.8} />
-            </div>
-            <span className={`text-[10px] transition-all duration-200 ${view === t.id ? 'font-extrabold' : 'font-semibold'}`}>{t.l}</span>
-          </button>
-        ))}
-      </nav>
-
-      {/* 确认弹窗 */}
-      <AnimatePresence>
-        {confirmDialog && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setConfirmDialog(null)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="relative bg-white rounded-3xl p-6 w-full max-w-xs shadow-2xl"
-            >
-              <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <AlertCircle size={24} className="text-amber-500" />
-              </div>
-              <h3 className="text-base font-extrabold text-slate-900 text-center mb-2">{confirmDialog.title}</h3>
-              <p className="text-sm text-slate-500 text-center leading-relaxed mb-6">{confirmDialog.message}</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setConfirmDialog(null)}
-                  className="py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl active:scale-[0.98] transition-transform"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={confirmDialog.onConfirm}
-                  className="py-3 bg-red-500 text-white font-bold rounded-2xl active:scale-[0.98] transition-transform shadow-lg shadow-red-500/25"
-                >
-                  确定
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
 }
