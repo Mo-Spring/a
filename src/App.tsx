@@ -1074,7 +1074,14 @@ export default function App() {
             };
           }
         }
-        setIndexVal(prev => ({ ...prev, ...newVal }));
+        // 合并写入：保留已有字段（如 p/cp），只更新蛋卷提供的估值字段
+        setIndexVal(prev => {
+          const merged = { ...prev };
+          for (const [code, val] of Object.entries(newVal)) {
+            merged[code] = { ...(prev[code] || {}), ...val };
+          }
+          return merged;
+        });
       };
 
       try {
@@ -1093,10 +1100,15 @@ export default function App() {
         console.warn('[IndexVal] Danjuan API failed:', e);
       }
 
-      // Supplementary: fetch PE/PB for indices not matched by danjuan via eastmoney stock API
+      // Supplementary: fetch PE/PB/price for indices not matched by danjuan via eastmoney stock API
       const missingIndices = indices.filter(idx => !matchedCodes.has(idx.c));
       for (const idx of missingIndices) {
-        if (!idx.mk || idx.m === 'GLOBAL') continue;
+        const secid = idx.mk ? `${idx.mk}.${idx.c}` :
+                      idx.m === 'GLOBAL' ? `100.${idx.c}` :
+                      idx.m === 'HK' ? `116.${idx.c}` :
+                      (idx.c.startsWith('6') || idx.c.startsWith('000') || idx.c.startsWith('930') || idx.c.startsWith('H')) ? `1.${idx.c}` :
+                      (idx.c.startsWith('399') || idx.c.startsWith('159')) ? `0.${idx.c}` :
+                      `1.${idx.c}`;
         const cbName = `jsonp_idxval_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         const timeoutId = setTimeout(() => {
           delete (window as any)[cbName];
@@ -1112,10 +1124,13 @@ export default function App() {
             const pb = d.data.f167 !== '-' && d.data.f167 > 0 ? d.data.f167 / 100 :
                        (d.data.f23 !== '-' && d.data.f23 > 0 ? d.data.f23 / 100 : undefined);
             const dy = d.data.f173 !== '-' && d.data.f173 > 0 ? d.data.f173 / 100 : undefined;
-            if (pe || pb) {
+            const priceScale = idx.m === 'HK' ? 1000 : 100;
+            const p = d.data.f2 !== undefined && d.data.f2 !== '-' ? (d.data.f2 / priceScale).toFixed(2) : undefined;
+            const cp = d.data.f3 !== undefined && d.data.f3 !== '-' ? (d.data.f3 / 100).toFixed(2) : undefined;
+            if (pe || pb || p) {
               setIndexVal(prev => ({
                 ...prev,
-                [idx.c]: { pe, pb, dy }
+                [idx.c]: { ...(prev[idx.c] || {}), pe, pb, dy, p, cp }
               }));
             }
           }
@@ -1126,7 +1141,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${idx.mk}.${idx.c}&fields=f9,f23,f162,f167,f173&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f23,f162,f167,f173&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           delete (window as any)[cbName];
@@ -1203,14 +1218,27 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [allIndexCodes]);
 
-  // 专用指数 PE/PB/DY 获取：逐个 JSONP 请求 eastmoney 单品种接口
-  // 批量 API (ulist.np) 对指数可能不返回估值字段，此效果确保指数估值数据可靠获取
+  // 专用指数获取：逐个 JSONP 请求 eastmoney 单品种接口
+  // 获取 PE/PB/DY + 实时价格/涨跌幅，覆盖全部指数（含海外）
   useEffect(() => {
     if (indices.length === 0) return;
 
+    // 根据市场和代码推算 secid 前缀
+    const getSecid = (idx: Index): string | null => {
+      if (idx.mk) return `${idx.mk}.${idx.c}`;
+      // 无 mk 时自动推算
+      if (idx.m === 'GLOBAL') return `100.${idx.c}`;
+      if (idx.m === 'HK') return `116.${idx.c}`;
+      // A 股：上交所 1，深交所 0
+      if (idx.c.startsWith('6') || idx.c.startsWith('000') || idx.c.startsWith('930') || idx.c.startsWith('H')) return `1.${idx.c}`;
+      if (idx.c.startsWith('399') || idx.c.startsWith('159')) return `0.${idx.c}`;
+      return `1.${idx.c}`; // 默认上交所
+    };
+
     const fetchAllIndexVal = () => {
       indices.forEach((idx, i) => {
-        if (!idx.mk || idx.m === 'GLOBAL') return;
+        const secid = getSecid(idx);
+        if (!secid) return;
 
         const cbName = `jsonp_ixval_${Date.now()}_${i}_${Math.floor(Math.random() * 10000)}`;
         const timeoutId = setTimeout(() => {
@@ -1252,7 +1280,7 @@ export default function App() {
 
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${idx.mk}.${idx.c}&fields=f2,f3,f9,f23,f162,f167,f173&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f23,f162,f167,f173&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           delete (window as any)[cbName];
