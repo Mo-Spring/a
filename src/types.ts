@@ -78,15 +78,9 @@ export interface PERelativeParams {
   growthWeight: number;      // PEG 权重
 }
 
-export interface GordonParams {
-  maxGrowthRate: number;     // 增长率上限
-  defaultPayoutRatio: number; // 默认分红比例
-}
-
 export interface ValuationConfig {
   dcf: DCFParams;
   pe: PERelativeParams;
-  gordon: GordonParams;
 }
 
 export type PresetName = 'conservative' | 'neutral' | 'aggressive';
@@ -98,7 +92,6 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     config: {
       dcf: { rf: 0.03, erp: 0.07, terminalGrowth: 0.02, projectionYears: 10, discountRates: { bull: 0.08, base: 0.10, bear: 0.12 } },
       pe: { roeBase: 0.12, industryWeight: 0.35, historicalWeight: 0.35, growthWeight: 0.30 },
-      gordon: { maxGrowthRate: 0.06, defaultPayoutRatio: 0.4 },
     },
   },
   neutral: {
@@ -107,7 +100,6 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     config: {
       dcf: { rf: 0.025, erp: 0.06, terminalGrowth: 0.03, projectionYears: 10, discountRates: { bull: 0.08, base: 0.10, bear: 0.12 } },
       pe: { roeBase: 0.15, industryWeight: 0.40, historicalWeight: 0.35, growthWeight: 0.25 },
-      gordon: { maxGrowthRate: 0.10, defaultPayoutRatio: 0.3 },
     },
   },
   aggressive: {
@@ -116,7 +108,6 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     config: {
       dcf: { rf: 0.02, erp: 0.05, terminalGrowth: 0.04, projectionYears: 10, discountRates: { bull: 0.07, base: 0.09, bear: 0.11 } },
       pe: { roeBase: 0.18, industryWeight: 0.45, historicalWeight: 0.30, growthWeight: 0.25 },
-      gordon: { maxGrowthRate: 0.15, defaultPayoutRatio: 0.2 },
     },
   },
 };
