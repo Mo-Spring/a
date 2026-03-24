@@ -1,22 +1,45 @@
 /**
- * 五维估值系统 - 类型定义
+ * 估值系统 - 类型定义
+ * 两个核心模型：DCF + PE 相对估值
+ * 辅助信号：护城河、清算底线、市场预期
  */
 
-// ─── 输入数据 ───
+// ─── 财务报表原始数据 ───
 
-export interface HistoricalData {
-  years: string[];
-  revenues: number[];       // 亿
-  netIncomes: number[];     // 亿
-  operatingCFs: number[];   // 亿
-  freeCFs: number[];        // 亿
-  roes: number[];
-  epses: number[];
-  dividends: number[];
-  payoutRatios: number[];
-  revenueGrowths: number[];
-  netIncomeGrowths: number[];
+export interface FinancialStatement {
+  year: string;           // "2024"
+  reportDate: string;     // "2024-12-31"
+  // 利润表
+  revenue: number;        // 营业收入（亿）
+  costOfRevenue: number;  // 营业成本（亿）
+  grossProfit: number;    // 毛利（亿）
+  operatingProfit: number;// 营业利润（亿）
+  netIncome: number;      // 归母净利润（亿）
+  eps: number;            // 基本每股收益
+  // 资产负债表
+  totalAssets: number;    // 总资产（亿）
+  totalEquity: number;    // 归母净资产（亿）
+  totalDebt: number;      // 总负债（亿）
+  bvps: number;           // 每股净资产
+  // 现金流量表
+  operatingCF: number;    // 经营活动现金流净额（亿）
+  investingCF: number;    // 投资活动现金流净额（亿）
+  financingCF: number;    // 筹资活动现金流净额（亿）
+  capex: number;          // 资本支出（亿，取绝对值）
+  freeCF: number;         // 自由现金流 = 经营CF - CapEx（亿）
+  dividendPaid: number;   // 分红支出（亿）
+  // 衍生指标
+  roe: number;            // ROE %
+  roa: number;            // ROA %
+  grossMargin: number;    // 毛利率 %
+  netMargin: number;      // 净利率 %
+  debtRatio: number;      // 资产负债率 %
+  revenueGrowth: number;  // 同比营收增长 %
+  netIncomeGrowth: number;// 同比净利润增长 %
+  payoutRatio: number;    // 分红比例 %
 }
+
+// ─── 估值输入 ───
 
 export interface StockInput {
   code: string;
@@ -24,11 +47,11 @@ export interface StockInput {
   market: 'A' | 'HK' | 'GLOBAL';
 
   price: number;            // 当前股价
-  pe: number;               // 当前 PE
+  pe: number;               // 当前 PE(TTM)
   pb: number;               // 当前 PB
   ps: number;               // 当前 PS
-  dy: number;               // 股息率 %  (e.g. 3.5 = 3.5%)
-  roe: number;              // ROE %     (e.g. 15.2 = 15.2%)
+  dy: number;               // 股息率 %
+  roe: number;              // ROE %
   roa: number;              // ROA %
   eps: number;              // 每股收益
   bvps: number;             // 每股净资产
@@ -45,9 +68,10 @@ export interface StockInput {
   dividendPerShare: number; // 每股股利
   revenueGrowth: number;    // 营收增长率 %
   netIncomeGrowth: number;  // 净利润增长率 %
-
-  history: HistoricalData | null;
   shares?: number;          // 总股本（亿股）
+
+  // 真实财务报表历史
+  statements: FinancialStatement[]; // 按时间倒序，[0] = 最新
 }
 
 export interface IndustryData {
@@ -55,29 +79,27 @@ export interface IndustryData {
   pb: number;
   roe: number;
   name: string;
+  // 同行业公司估值参考
+  peers?: Array<{ code: string; name: string; pe: number; pb: number; roe: number; mcap: number }>;
 }
 
 export interface ValuationParams {
   dcf: {
-    rf: number;
-    erp: number;
-    terminalGrowth: number;
-    projectionYears: number;
+    rf: number;               // 无风险利率
+    erp: number;              // 股权风险溢价
+    terminalGrowth: number;   // 永续增长率
+    projectionYears: number;  // 预测年数
     discountRates: { bull: number; base: number; bear: number };
   };
   pe: {
-    roeBase: number;
-    industryWeight: number;
-    historicalWeight: number;
-    growthWeight: number;
-  };
-  gordon: {
-    maxGrowthRate: number;
-    defaultPayoutRatio: number;
+    roeBase: number;          // ROE 基准值
+    industryWeight: number;   // 行业 PE 权重
+    historicalWeight: number; // 历史 PE 权重
+    growthWeight: number;     // PEG 权重
   };
 }
 
-// ─── 输出 ───
+// ─── 估值输出 ───
 
 export interface ValuationRange {
   low: number;
@@ -85,17 +107,21 @@ export interface ValuationRange {
   high: number;
 }
 
+/** DCF 模型结果 */
 export interface DCFResult {
-  fairValue: ValuationRange;          // 估值区间（每股）
-  impliedPE: ValuationRange;          // 隐含 PE 区间
-  terminalValueRatio: number;         // 终值占比 (0~1)
-  wacc: number;
+  fairValue: ValuationRange;      // 每股估值
+  impliedPE: ValuationRange;      // 隐含 PE
+  wacc: number;                   // 加权平均资本成本
+  terminalValueRatio: number;     // 终值占比
   phases: Array<{ years: number; growth: number }>;
   projection: Array<{ year: number; fcf: number; pv: number }>;
   usedBasis: 'fcf' | 'netIncome' | 'eps';
   confidence: number;
+  // 敏感性分析
+  sensitivity?: Array<{ growth: number; wacc: number; value: number }>;
 }
 
+/** PE 相对估值结果 */
 export interface RelativeResult {
   fairPE: ValuationRange;
   fairPrice: ValuationRange;
@@ -104,41 +130,22 @@ export interface RelativeResult {
   pegFairPE: number;
   peg: number;
   confidence: number;
+  // 历史 PE 区间（近 5 年）
+  historicalPEStats?: {
+    min: number;
+    max: number;
+    median: number;
+    current: number;
+    percentile: number;  // 当前 PE 在历史中的百分位
+  };
 }
 
-export interface ROICResult {
-  roic: number;
-  wacc: number;
-  spread: number;              // ROIC - WACC
-  createsValue: boolean;
-  valuationMultiplier: number; // 0.5~1.5
-  quality: 'excellent' | 'good' | 'average' | 'poor';
-  confidence: number;
-}
-
-export interface AssetResult {
-  fairPB: number;
-  fairPrice: number;
-  liquidationPrice: number;
-  currentPB: number;
-  discount: number;            // 当前价 vs 资产估值的折溢价 %
-  confidence: number;
-}
-
-export interface ReverseDCFResult {
-  impliedGrowthRates: { fcf: number | null; eps: number | null };
-  consensusGrowth: number | null;
-  userGrowth: number | null;
-  gap: number | null;          // 用户假设 vs 市场隐含
-  isOverpriced: boolean | null;
-  confidence: number;
-}
-
-export interface ModelWeights {
-  dcf: number;
-  relative: number;
-  roic: number;
-  asset: number;
+/** 辅助信号 */
+export interface MoatSignal {
+  label: string;       // "盈利护城河" / "现金流质量" / ...
+  score: number;       // 0~100
+  level: 'strong' | 'good' | 'average' | 'weak';
+  detail: string;      // 解释文字
 }
 
 export interface RiskSignal {
@@ -146,20 +153,34 @@ export interface RiskSignal {
   message: string;
 }
 
+/** 综合估值结果 */
 export interface ValuationResult {
   dcf: DCFResult;
   relative: RelativeResult;
-  roic: ROICResult;
-  asset: AssetResult;
-  reverse: ReverseDCFResult;
 
+  // 综合估值
   compositeFairValue: ValuationRange;
   currentPrice: number;
   marginOfSafety: ValuationRange;   // %
   verdict: 'deeply_undervalued' | 'undervalued' | 'fair' | 'overvalued' | 'deeply_overvalued';
   verdictText: string;
 
-  modelWeights: ModelWeights;
+  // 辅助信号
+  moatSignals: MoatSignal[];
   riskSignals: RiskSignal[];
+  liquidationPrice: number;         // 清算底线
+  impliedGrowth: number | null;     // 当前股价隐含的年化增长率
+
+  // 元信息
+  modelWeights: { dcf: number; relative: number };
   confidence: number;
+}
+
+// ─── 本地缓存 ───
+
+export interface CachedValuationData {
+  code: string;
+  statements: FinancialStatement[];
+  fetchedAt: number;
+  ttl: number; // 缓存有效时长（ms），默认 7 天
 }
