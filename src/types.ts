@@ -39,6 +39,7 @@ export interface Index {
   n: string; // name
   m: 'A' | 'HK' | 'GLOBAL'; // market category
   mk?: string; // raw eastmoney market id
+  pePct?: number; // PE 百分位（from hardcoded data or API）
 }
 
 export type ViewType = 'home' | 'ind' | 'sub' | 'comp' | 'search' | 'ai' | 'fav' | 'index' | 'index_list' | 'index_detail' | 'settings';
