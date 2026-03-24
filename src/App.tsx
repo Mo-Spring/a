@@ -57,6 +57,7 @@ interface SearchViewProps {
   handleAiAddIndex: () => void;
   isAddingIndex: boolean;
   aiIndexError: string | null;
+  batchData: Record<string, any>;
 }
 
 const SearchView = ({
@@ -74,7 +75,8 @@ const SearchView = ({
   aiAddError,
   handleAiAddIndex,
   isAddingIndex,
-  aiIndexError
+  aiIndexError,
+  batchData,
 }: SearchViewProps) => {
   const [searchType, setSearchType] = useState<'stock' | 'index'>('stock');
   const [remoteResults, setRemoteResults] = useState<any[]>([]);
@@ -3300,6 +3302,7 @@ export default function App() {
                 handleAiAddIndex={handleAiAddIndex}
                 isAddingIndex={isAddingIndex}
                 aiIndexError={aiIndexError}
+                batchData={batchData}
               />
             )}
             {view === 'ai' && renderAI()}
