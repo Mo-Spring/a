@@ -3320,6 +3320,18 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              <Slider label="乐观折现率" value={valuationConfig.dcf.discountRates.bull} min={0.05} max={0.12} step={0.005} unit="%" onChange={v => {
+                const newCfg = { ...valuationConfig, dcf: { ...valuationConfig.dcf, discountRates: { ...valuationConfig.dcf.discountRates, bull: v } } };
+                setValuationConfig(newCfg); setActivePreset(null); localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg)); localStorage.removeItem('iv_val_preset');
+              }} desc="低折现率 → 高估值" />
+              <Slider label="中性折现率" value={valuationConfig.dcf.discountRates.base} min={0.06} max={0.14} step={0.005} unit="%" onChange={v => {
+                const newCfg = { ...valuationConfig, dcf: { ...valuationConfig.dcf, discountRates: { ...valuationConfig.dcf.discountRates, base: v } } };
+                setValuationConfig(newCfg); setActivePreset(null); localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg)); localStorage.removeItem('iv_val_preset');
+              }} desc="基准情景" />
+              <Slider label="悲观折现率" value={valuationConfig.dcf.discountRates.bear} min={0.08} max={0.18} step={0.005} unit="%" onChange={v => {
+                const newCfg = { ...valuationConfig, dcf: { ...valuationConfig.dcf, discountRates: { ...valuationConfig.dcf.discountRates, bear: v } } };
+                setValuationConfig(newCfg); setActivePreset(null); localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg)); localStorage.removeItem('iv_val_preset');
+              }} desc="高折现率 → 低估值" />
             </div>
 
             {/* PE 相对估值参数 */}
@@ -3331,11 +3343,25 @@ export default function App() {
               <Slider label="增长权重 (PEG)" value={valuationConfig.pe.growthWeight} min={0.1} max={0.5} step={0.05} unit="" onChange={v => updatePE('growthWeight', v)} />
             </div>
 
-            {/* Gordon 参数 */}
+            {/* ③ ROIC 质量 & ④ 资产估值 — 自动计算 */}
             <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">③ Gordon 股利折现</h3>
-              <Slider label="增长率上限" value={valuationConfig.gordon.maxGrowthRate} min={0.03} max={0.20} step={0.01} unit="%" onChange={v => updateGordon('maxGrowthRate', v)} desc="股利永续增长率上限" />
-              <Slider label="默认分红比例" value={valuationConfig.gordon.defaultPayoutRatio} min={0.1} max={0.6} step={0.05} unit="" onChange={v => updateGordon('defaultPayoutRatio', v)} desc="无数据时的分红比例假设" />
+              <h3 className="text-xs font-bold text-indigo-600">③ ROIC 质量模型 / ④ 资产估值</h3>
+              <div className="text-[10px] text-slate-500 space-y-1.5 leading-relaxed">
+                <p>• <b>ROIC</b> = NOPAT / 投入资本，与 WACC 比较判断是否创造经济价值，输出 0.5~1.5 估值调整系数</p>
+                <p>• <b>资产估值</b> = 行业合理 PB × ROE修正 × 每股净资产，同时计算 0.7×BVPS 清算底线</p>
+                <p>• 两个模型参数由公司财务数据自动驱动，无需手动设置</p>
+                <p>• 动态权重：高成长→DCF↑，成熟低增长→PE↑，ROIC差→打折，重资产→资产估值↑</p>
+              </div>
+            </div>
+
+            {/* ⑤ 市场预期反推 — 说明 */}
+            <div className="card-elevated p-4 space-y-3">
+              <h3 className="text-xs font-bold text-indigo-600">⑤ 市场预期反推</h3>
+              <div className="text-[10px] text-slate-500 space-y-1.5 leading-relaxed">
+                <p>• 根据当前股价，用二分法反推市场隐含的年化增长率</p>
+                <p>• 分别用 FCF 和 EPS 两个基准计算，加权输出共识增长率</p>
+                <p>• 与你的增长假设对比：你的假设 &gt; 市场隐含 → 可能低估，反之可能高估</p>
+              </div>
             </div>
 
             <button onClick={() => applyPreset('neutral')} className="btn-secondary w-full py-3">恢复默认参数</button>
