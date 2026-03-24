@@ -4,6 +4,8 @@ import { motion } from 'motion/react';
 import { Industry } from '../types';
 import { useAppContext } from '../AppContext';
 import { getGrade, gColor } from '../helpers';
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { VALUATION_PRESETS } from '../types';
 
@@ -106,28 +108,36 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
     liquidationPrice = valResult.liquidationPrice;
     impliedGrowth = valResult.impliedGrowth;
     valConfidence = valResult.confidence;
-  } else if (currentPE > 0) {
+  } else if (currentPE > 0 && currentPrice > 0) {
+    // Fallback：简化估值（引擎未跑完时），所有输出统一为「每股价值 ¥」
     const rf = 0.025, erp = 0.06, beta = 1, wacc = rf + beta * erp;
     const growth = currentROE > 20 ? 0.08 : currentROE > 15 ? 0.06 : currentROE > 10 ? 0.04 : 0.02;
-    const tg = 0.025, yrs = 10, eps = currentPE > 0 ? (100 / currentPE) : 0;
-    let dcf = 0;
-    for (let y = 1; y <= yrs; y++) dcf += eps * Math.pow(1 + growth, y) / Math.pow(1 + wacc, y);
-    dcf += (eps * Math.pow(1 + growth, yrs) * (1 + tg)) / (wacc - tg) / Math.pow(1 + wacc, yrs);
-    const dcfPE = eps > 0 ? (dcf / eps) : 0;
-    const indPE = 20;
-    const pePE = indPE * (currentROE / 15);
-    const gROE = currentROE / 100, gG = Math.min(gROE * 0.3, 0.04);
-    const pbV = gROE > 0 ? ((gROE - gG) / (wacc - gG)) : 0;
-    const gPE = gROE > 0 ? (pbV / gROE) : 0;
-    const fPE = (dcfPE + pePE + gPE) / 3;
-    compositeFair = { low: fPE * 0.8, mid: fPE, high: fPE * 1.2 };
-    compositeMargin = { low: 0, mid: currentPE > 0 ? ((fPE - currentPE) / currentPE * 100) : 0, high: 0 };
+    const tg = 0.025, yrs = 10;
+
+    // DCF：用 EPS 做简化折现 → 输出每股价值
+    let dcfValue = 0;
+    for (let y = 1; y <= yrs; y++) dcfValue += currentEPS * Math.pow(1 + growth, y) / Math.pow(1 + wacc, y);
+    dcfValue += (currentEPS * Math.pow(1 + growth, yrs) * (1 + tg)) / (wacc - tg) / Math.pow(1 + wacc, yrs);
+    dcfValue = Math.max(0, dcfValue);
+    dcfFair = { low: dcfValue * 0.9, mid: dcfValue, high: dcfValue * 1.1 };
+
+    // PE 相对：合理 PE × EPS → 每股价值
+    const fairPE = clamp(20 * clamp(0.5 + 5 * (currentROE / 100 - 0.10), 0.3, 2.0), 3, 60);
+    const relValue = fairPE * currentEPS;
+    relFairPE = { low: fairPE * 0.8, mid: fairPE, high: fairPE * 1.2 };
+
+    // 综合：两个都是 ¥，安全加权
+    const mid = (dcfValue + relValue) / 2;
+    compositeFair = { low: mid * 0.8, mid, high: mid * 1.2 };
+    compositeMargin = {
+      low: ((compositeFair.low - currentPrice) / currentPrice) * 100,
+      mid: ((mid - currentPrice) / currentPrice) * 100,
+      high: ((compositeFair.high - currentPrice) / currentPrice) * 100,
+    };
     verdictText = compositeMargin.mid > 10 ? '低估' : compositeMargin.mid > -10 ? '合理' : '高估';
-    dcfFair = { low: dcfPE * 0.9, mid: dcfPE, high: dcfPE * 1.1 };
-    relFairPE = { low: pePE * 0.8, mid: pePE, high: pePE * 1.2 };
   }
 
-  const fairPrice = currentPE > 0 && compositeFair.mid > 0 ? currentPrice * (compositeFair.mid / currentPE) : 0;
+  const fairPrice = compositeFair.mid > 0 ? compositeFair.mid : 0;
   const margin = compositeMargin.mid;
 
   let vc = 'bg-slate-50 text-slate-400', vt = '—';
@@ -299,10 +309,12 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
                     {[...new Set(dcfSensitivity.map((s: any) => s.wacc))].sort((a: number, b: number) => a - b).map((w: number, i: number) => (
                       <div key={i} className="bg-slate-100 px-1.5 py-1 text-center font-bold text-slate-500">{(w * 100).toFixed(1)}%</div>
                     ))}
-                    {dcfSensitivity.filter((_: any, i: number) => i % 3 === 1).map((s: any, i: number) => (
+                    {[...new Set(dcfSensitivity.map((s: any) => s.growth))].sort((a: number, b: number) => a - b).map((g: number, i: number) => (
                       <React.Fragment key={i}>
-                        <div className="bg-white px-1.5 py-1 text-center font-bold text-slate-600">{(s.growth * 100).toFixed(1)}%</div>
-                        {dcfSensitivity.filter((x: any) => Math.abs(x.growth - s.growth) < 0.001).map((x: any, j: number) => (
+                        <div className="bg-white px-1.5 py-1 text-center font-bold text-slate-600">{(g * 100).toFixed(1)}%</div>
+                        {dcfSensitivity.filter((x: any) => Math.abs(x.growth - g) < 0.0001)
+                          .sort((a: any, b: any) => a.wacc - b.wacc)
+                          .map((x: any, j: number) => (
                           <div key={j} className={`bg-white px-1.5 py-1 text-center font-mono font-bold ${
                             x.value > currentPrice * 1.2 ? 'text-emerald-600' :
                             x.value < currentPrice * 0.8 ? 'text-red-500' : 'text-slate-700'
