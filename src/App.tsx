@@ -791,34 +791,48 @@ export default function App() {
                 const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
                 const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
 
+                // push2 API 实际字段映射（已验证）：
+                // f2=最新价, f3=涨跌幅, f9=市盈率(动态), f12=代码, f13=市场
+                // f20=总市值(元), f23=市净率, f37=ROE(加权%)
+                // f50=总资产, f54=总负债, f57=资产负债比率(%)
+                // f112=每股收益, f113=每股净资产, f116=总市值(亿), f117=流通市值(亿)
+                // f133=股息率(%)
+                // ⚠️ f52=固定资产(元), f69=超大单净占比, f98/f99=DDX飘红天数 — 这些不是财务指标!
                 newData[code] = {
                   // 基础行情
                   p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
                   cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                  // 估值指标
-                  pe: valPos(item.f162, 100) || valPos(item.f9, 100),
-                  pb: valPos(item.f167, 100) || valPos(item.f23, 100),
-                  dy: valPos(item.f177, 100),
-                  ps: valPos(item.f188, 100),
-                  roe: val(item.f183, 100) || val(item.f37),
-                  roa: val(item.f184, 100),
-                  eps: valPos(item.f168, 100),
-                  // 市值（f20=总市值）
-                  mcap: valPos(item.f20, 100000000) || valPos(item.f57, 100000000),
-                  fcap: valPos(item.f117, 100000000),
-                  // 盈利质量
-                  grossMargin: val(item.f185, 100),
-                  netMargin: val(item.f186, 100),
-                  debt: val(item.f52, 100),
-                  // 增长率
-                  revenueGrowth: val(item.f98, 100),
-                  netIncomeGrowth: val(item.f99, 100),
-                  // 分红
-                  dividendPerShare: val(item.f69),
-                  payoutYears: val(item.f100),
-                  // 百分位
-                  pePct: val(item.f137, 100),
-                  pbPct: val(item.f138, 100),
+                  // 估值指标：f9=市盈率(动态), f23=市净率
+                  pe: valPos(item.f9),
+                  pb: valPos(item.f23),
+                  // f133=股息率(%)
+                  dy: valPos(item.f133),
+                  // PS 从财务报表补充，这里不依赖不可靠的 f188
+                  ps: undefined,
+                  // f37=ROE(加权%)，直接使用
+                  roe: val(item.f37),
+                  // ROA 需从三表计算，这里无法直接获取
+                  roa: undefined,
+                  // f112=每股收益
+                  eps: valPos(item.f112),
+                  // f20=总市值(元), f116=总市值(亿)
+                  mcap: valPos(item.f20, 100000000),
+                  fcap: valPos(item.f117),
+                  // 毛利率/净利率 需从三表计算
+                  grossMargin: undefined,
+                  netMargin: undefined,
+                  // f57=资产负债比率(%)，正确字段
+                  debt: val(item.f57),
+                  // 营收/净利润增长率 需从财务报表补充
+                  revenueGrowth: undefined,
+                  netIncomeGrowth: undefined,
+                  // 每股股利 = 股息率 × 价格
+                  dividendPerShare: (item.f133 !== '-' && item.f133 !== undefined && item.f133 > 0 && item.f2 > 0)
+                    ? (item.f2 / pScale) * (item.f133 / 100) : undefined,
+                  payoutYears: undefined,
+                  // f137/f138=PE/PB百分位
+                  pePct: val(item.f137),
+                  pbPct: val(item.f138),
                 };
               });
               return newData;
@@ -831,7 +845,7 @@ export default function App() {
         
         const script = document.createElement('script');
         script.id = cbName;
-        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138&cb=${cbName}`;
+        script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f57,f112,f113,f116,f117,f133,f137,f138&cb=${cbName}`;
         script.onerror = () => {
           clearTimeout(timeoutId);
           console.warn(`[Batch] JSONP error, trying fetch fallback for chunk ${i/chunkSize}`);
@@ -839,7 +853,7 @@ export default function App() {
           const scriptEl = document.getElementById(cbName);
           if (scriptEl) scriptEl.remove();
           // Fallback: try fetch() (works on Capacitor native, may fail on web due to CORS)
-          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138`)
+          fetch(`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=f2,f3,f9,f12,f13,f14,f20,f23,f37,f57,f112,f113,f116,f117,f133,f137,f138`)
             .then(r => r.json())
             .then((d: any) => {
               if (d?.data?.diff) {
@@ -853,16 +867,31 @@ export default function App() {
                     if (code === 'NIFTY') code = 'NSEI';
                     const mkId = item.f13;
                     const pScale = mkId === 116 ? 1000 : 100;
-                    const pe = item.f162 !== '-' && item.f162 !== undefined && item.f162 > 0 ? item.f162 / 100 : (item.f9 !== '-' && item.f9 !== undefined && item.f9 > 0 ? item.f9 / 100 : undefined);
-                    const pb = item.f167 !== '-' && item.f167 !== undefined && item.f167 > 0 ? item.f167 / 100 : (item.f23 !== '-' && item.f23 !== undefined && item.f23 > 0 ? item.f23 / 100 : undefined);
-                    const dy = item.f173 !== '-' && item.f173 !== undefined && item.f173 > 0 ? item.f173 / 100 : undefined;
-                    const ps = item.f188 !== '-' && item.f188 !== undefined && item.f188 > 0 ? item.f188 / 100 : undefined;
-                    const mcap = item.f116 !== '-' && item.f116 !== undefined ? item.f116 / 100000000 : undefined;
-                    const fcap = item.f117 !== '-' && item.f117 !== undefined ? item.f117 / 100000000 : undefined;
-                    const roe = item.f37 !== '-' && item.f37 !== undefined && item.f37 > 0 ? item.f37 : undefined;
-                    const p = item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined;
-                    const cp = item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined;
-                    newData[code] = { pe, pb, dy, ps, mcap, fcap, roe, p, cp };
+                    const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
+                    const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
+                    newData[code] = {
+                      p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
+                      cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
+                      pe: valPos(item.f9),
+                      pb: valPos(item.f23),
+                      dy: valPos(item.f133),
+                      ps: undefined,
+                      roe: val(item.f37),
+                      roa: undefined,
+                      eps: valPos(item.f112),
+                      mcap: valPos(item.f20, 100000000),
+                      fcap: valPos(item.f117),
+                      grossMargin: undefined,
+                      netMargin: undefined,
+                      debt: val(item.f57),
+                      revenueGrowth: undefined,
+                      netIncomeGrowth: undefined,
+                      dividendPerShare: (item.f133 !== '-' && item.f133 !== undefined && item.f133 > 0 && item.f2 > 0)
+                        ? (item.f2 / pScale) * (item.f133 / 100) : undefined,
+                      payoutYears: undefined,
+                      pePct: val(item.f137),
+                      pbPct: val(item.f138),
+                    };
                   });
                   return newData;
                 });
@@ -919,11 +948,11 @@ export default function App() {
               newData[`idx_${code}`] = {
                 p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(2) : undefined,
                 cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                pe: valPos(item.f162, 100) || valPos(item.f9, 100),
-                pb: valPos(item.f167, 100) || valPos(item.f23, 100),
-                dy: valPos(item.f177, 100),
-                ps: valPos(item.f188, 100),
-                mcap: valPos(item.f20, 100000000) || valPos(item.f57, 100000000),
+                pe: valPos(item.f9),
+                pb: valPos(item.f23),
+                dy: valPos(item.f133),
+                ps: undefined,
+                mcap: valPos(item.f20, 100000000),
               };
             });
             return newData;
@@ -936,7 +965,7 @@ export default function App() {
 
       const script = document.createElement('script');
       script.id = cbName;
-      script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=f2,f3,f9,f12,f13,f20,f23,f57,f162,f167,f177,f188&cb=${cbName}`;
+      script.src = `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=f2,f3,f9,f12,f13,f20,f23,f133&cb=${cbName}`;
       document.head.appendChild(script);
     };
 
@@ -1007,14 +1036,36 @@ export default function App() {
       }
     }
 
-    // 从 batchData 获取实时指标
+    // 从 batchData 获取实时指标，结合三表数据补充
     const bd = batchData[code] || {};
     const currentPE = bd.pe || 0;
     const currentPB = bd.pb || 0;
-    const currentEPS = bd.eps || 0;
     const currentPrice = parseFloat(bd.p || '0') || 0;
 
     if (currentPE <= 0 || currentPrice <= 0) return;
+
+    // EPS 优先从 batchData，否则用 price/PE 推算
+    const currentEPS = bd.eps || (currentPE > 0 ? currentPrice / currentPE : 0);
+
+    // ROA 从三表计算（净利润/总资产），batchData 的 roa 不可靠
+    const currentROA = stmts.length > 0 && stmts[0].totalAssets > 0
+      ? (stmts[0].netIncome / stmts[0].totalAssets) * 100 : 0;
+
+    // 资产负债率：优先从三表，其次从 batchData（f57），带 sanity check
+    let currentDebt = stmts.length > 0 ? stmts[0].debtRatio : 0;
+    if (currentDebt <= 0 && bd.debt && bd.debt > 0 && bd.debt <= 100) {
+      currentDebt = bd.debt;
+    }
+    // sanity check：负债率不应超过 100% 或低于 0%
+    if (currentDebt < 0 || currentDebt > 100) currentDebt = 0;
+
+    // PS 从三表推算：营收/市值
+    const currentPS = bd.ps || (stmts.length > 0 && bd.mcap && bd.mcap > 0
+      ? stmts[0].revenue / bd.mcap : 0);
+
+    // 每股股利：从 dy × price 推算
+    const currentDividendPS = bd.dividendPerShare || (bd.dy && bd.dy > 0 && currentPrice > 0
+      ? currentPrice * (bd.dy / 100) : 0);
 
     const stockInput: StockInput = {
       code,
@@ -1023,12 +1074,12 @@ export default function App() {
       price: currentPrice,
       pe: currentPE,
       pb: currentPB,
-      ps: bd.ps || 0,
+      ps: currentPS,
       dy: bd.dy || 0,
-      roe: bd.roe || 0,
-      roa: bd.roa || 0,
+      roe: bd.roe || (stmts.length > 0 ? stmts[0].roe : 0),
+      roa: currentROA,
       eps: currentEPS,
-      bvps: stmts.length > 0 ? stmts[0].bvps : 0,
+      bvps: bd.eps && currentPE > 0 ? currentPrice / currentPE * currentPB : (stmts.length > 0 ? stmts[0].bvps : 0),
       mcap: bd.mcap || 0,
       fcap: bd.fcap || 0,
       revenue: stmts.length > 0 ? stmts[0].revenue : 0,
@@ -1037,10 +1088,10 @@ export default function App() {
       freeCF: stmts.length > 0 ? stmts[0].freeCF : 0,
       grossMargin: stmts.length > 0 ? stmts[0].grossMargin : 0,
       netMargin: stmts.length > 0 ? stmts[0].netMargin : 0,
-      totalDebt: bd.debt || (stmts.length > 0 ? stmts[0].debtRatio : 0),
-      dividendPerShare: bd.dividendPerShare || 0,
-      revenueGrowth: bd.revenueGrowth || (stmts.length > 0 ? stmts[0].revenueGrowth : 0),
-      netIncomeGrowth: bd.netIncomeGrowth || (stmts.length > 0 ? stmts[0].netIncomeGrowth : 0),
+      totalDebt: currentDebt,
+      dividendPerShare: currentDividendPS,
+      revenueGrowth: stmts.length > 0 ? stmts[0].revenueGrowth : 0,
+      netIncomeGrowth: stmts.length > 0 ? stmts[0].netIncomeGrowth : 0,
       statements: stmts,
     };
 
@@ -1925,9 +1976,9 @@ export default function App() {
     const currentPE = (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
     const currentPB = (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
     const currentDY = (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
-    const currentROE = batchData[tCode]?.roe || 0;
-    const currentEPS = batchData[tCode]?.eps || 0;
-    const currentBVPS = stmts.length > 0 ? stmts[0].bvps : 0;
+    const currentROE = batchData[tCode]?.roe || (stmts.length > 0 ? stmts[0].roe : 0);
+    const currentEPS = batchData[tCode]?.eps || (currentPE > 0 && currentPrice > 0 ? currentPrice / currentPE : 0);
+    const currentBVPS = stmts.length > 0 ? stmts[0].bvps : (currentPB > 0 && currentEPS > 0 ? currentEPS * currentPB : 0);
     const currentPrice = (livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0');
 
     // ─── 估值结果提取 ───
@@ -2089,22 +2140,34 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {[
-              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe?.toFixed(1) || '—' },
-              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb?.toFixed(2) || '—' },
-              { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
-              { l: '股息率', v: batchData[tCode]?.dy ? `${batchData[tCode].dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—') },
-              { l: 'PS', v: livePrice?.ps || batchData[tCode]?.ps?.toFixed(1) || '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—') },
-              { l: 'EPS', v: batchData[tCode]?.eps ? `${batchData[tCode].eps.toFixed(2)}` : '—' },
-              { l: 'ROA', v: batchData[tCode]?.roa ? `${batchData[tCode].roa.toFixed(1)}%` : '—' },
-              { l: '负债率', v: batchData[tCode]?.debt ? `${batchData[tCode].debt.toFixed(1)}%` : '—' },
-            ].map(m => (
-              <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
-                <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
-                <div className="text-sm font-bold text-slate-700">{m.v}</div>
-              </div>
-            ))}
+            {(() => {
+              // 从 statements 获取最新年报数据作为 fallback
+              const latestStmt = stmts.length > 0 ? stmts[0] : undefined;
+              // EPS: batchData > price/PE 推算
+              const epsVal = batchData[tCode]?.eps || (currentPE > 0 && currentPrice > 0 ? currentPrice / currentPE : 0);
+              // ROA: 从 statements 计算
+              const roaVal = batchData[tCode]?.roa || (latestStmt && latestStmt.totalAssets > 0 ? (latestStmt.netIncome / latestStmt.totalAssets) * 100 : 0);
+              // PS: batchData > revenue/mcap 推算
+              const psVal = batchData[tCode]?.ps || (latestStmt && batchData[tCode]?.mcap ? latestStmt.revenue / batchData[tCode].mcap : 0);
+              // 负债率: batchData(f57) > statements
+              const debtVal = batchData[tCode]?.debt || (latestStmt ? latestStmt.debtRatio : 0);
+              return [
+                { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe?.toFixed(1) || '—' },
+                { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb?.toFixed(2) || '—' },
+                { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
+                { l: '股息率', v: batchData[tCode]?.dy ? `${batchData[tCode].dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—') },
+                { l: 'PS', v: psVal > 0 ? psVal.toFixed(1) : '—' },
+                { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—') },
+                { l: 'EPS', v: epsVal > 0 ? epsVal.toFixed(2) : '—' },
+                { l: 'ROA', v: roaVal !== 0 ? `${roaVal.toFixed(1)}%` : '—' },
+                { l: '负债率', v: debtVal > 0 && debtVal <= 100 ? `${debtVal.toFixed(1)}%` : '—' },
+              ].map(m => (
+                <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
+                  <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
+                  <div className="text-sm font-bold text-slate-700">{m.v}</div>
+                </div>
+              ));
+            })()}
           </div>
 
           <div className="grid grid-cols-4 gap-2">
