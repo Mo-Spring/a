@@ -68,6 +68,7 @@ export interface DCFParams {
   erp: number;               // 股权风险溢价
   terminalGrowth: number;    // 永续增长率
   projectionYears: number;   // 预测年数
+  discountRates: { bull: number; base: number; bear: number }; // 三情景折现率
 }
 
 export interface PERelativeParams {
@@ -95,7 +96,7 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     name: '保守',
     desc: '高安全边际，适合稳健型投资者',
     config: {
-      dcf: { rf: 0.03, erp: 0.07, terminalGrowth: 0.02, projectionYears: 10 },
+      dcf: { rf: 0.03, erp: 0.07, terminalGrowth: 0.02, projectionYears: 10, discountRates: { bull: 0.08, base: 0.10, bear: 0.12 } },
       pe: { roeBase: 0.12, industryWeight: 0.35, historicalWeight: 0.35, growthWeight: 0.30 },
       gordon: { maxGrowthRate: 0.06, defaultPayoutRatio: 0.4 },
     },
@@ -104,7 +105,7 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     name: '中性',
     desc: '均衡估值，参考市场中位数',
     config: {
-      dcf: { rf: 0.025, erp: 0.06, terminalGrowth: 0.03, projectionYears: 10 },
+      dcf: { rf: 0.025, erp: 0.06, terminalGrowth: 0.03, projectionYears: 10, discountRates: { bull: 0.08, base: 0.10, bear: 0.12 } },
       pe: { roeBase: 0.15, industryWeight: 0.40, historicalWeight: 0.35, growthWeight: 0.25 },
       gordon: { maxGrowthRate: 0.10, defaultPayoutRatio: 0.3 },
     },
@@ -113,7 +114,7 @@ export const VALUATION_PRESETS: Record<PresetName, { name: string; desc: string;
     name: '激进',
     desc: '看好增长，适合进取型投资者',
     config: {
-      dcf: { rf: 0.02, erp: 0.05, terminalGrowth: 0.04, projectionYears: 10 },
+      dcf: { rf: 0.02, erp: 0.05, terminalGrowth: 0.04, projectionYears: 10, discountRates: { bull: 0.07, base: 0.09, bear: 0.11 } },
       pe: { roeBase: 0.18, industryWeight: 0.45, historicalWeight: 0.30, growthWeight: 0.25 },
       gordon: { maxGrowthRate: 0.15, defaultPayoutRatio: 0.2 },
     },
