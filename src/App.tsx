@@ -802,9 +802,9 @@ export default function App() {
                   // 基础行情
                   p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
                   cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                  // 估值指标：f9=市盈率(动态), f23=市净率
-                  pe: valPos(item.f9),
-                  pb: valPos(item.f23),
+                  // 估值指标：f9=市盈率(动态×100), f23=市净率(×100)
+                  pe: valPos(item.f9, 100),
+                  pb: valPos(item.f23, 100),
                   // f133=股息率(%)
                   dy: valPos(item.f133),
                   // PS 从财务报表补充，这里不依赖不可靠的 f188
@@ -872,8 +872,8 @@ export default function App() {
                     newData[code] = {
                       p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(mkId === 116 ? 3 : 2) : undefined,
                       cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                      pe: valPos(item.f9),
-                      pb: valPos(item.f23),
+                      pe: valPos(item.f9, 100),
+                      pb: valPos(item.f23, 100),
                       dy: valPos(item.f133),
                       ps: undefined,
                       roe: val(item.f37),
@@ -948,8 +948,8 @@ export default function App() {
               newData[`idx_${code}`] = {
                 p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(2) : undefined,
                 cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-                pe: valPos(item.f9),
-                pb: valPos(item.f23),
+                pe: valPos(item.f9, 100),
+                pb: valPos(item.f23, 100),
                 dy: valPos(item.f133),
                 ps: undefined,
                 mcap: valPos(item.f20, 100000000),
@@ -2226,7 +2226,7 @@ export default function App() {
                     <div className="font-medium mb-0.5">敏感性分析：</div>
                     <div className="grid gap-px bg-slate-200 rounded-lg overflow-hidden" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
                       <div className="bg-slate-100 px-1.5 py-1 text-center font-bold text-slate-500">增长率\\折现率</div>
-                      {[dcfSensitivity[1]?.wacc, dcfSensitivity[4]?.wacc, dcfSensitivity[7]?.wacc].filter(Boolean).map((w: number, i: number) => (
+                      {[...new Set(dcfSensitivity.map((s: any) => s.wacc))].sort((a: number, b: number) => a - b).map((w: number, i: number) => (
                         <div key={i} className="bg-slate-100 px-1.5 py-1 text-center font-bold text-slate-500">{(w * 100).toFixed(1)}%</div>
                       ))}
                       {dcfSensitivity.filter((_: any, i: number) => i % 3 === 1).map((s: any, i: number) => (
