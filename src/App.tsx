@@ -34,9 +34,9 @@ import { Industry, Company, AIConfig, ViewType, NavigationState, Index, Valuatio
 import { INDUSTRIES, HK_INDUSTRIES, DEFAULT_CONFIG, PROVIDERS } from './constants';
 import { DEFAULT_INDICES } from './indices';
 import { getAIResponse } from './services/aiService';
-import { fetchStockDataCached, CompleteStockData, clearStockCache } from './services/stockDataService';
+import { fetchFinancialStatementsCached } from './services/stockDataService';
 import { calculateValuation } from './valuation/engine';
-import { ValuationResult, StockInput, IndustryData } from './valuation/types';
+import { ValuationResult, StockInput, IndustryData, FinancialStatement } from './valuation/types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -599,8 +599,8 @@ export default function App() {
     revenue?: number; netIncome?: number;
   }>>({});
   const [indexVal, setIndexVal] = useState<Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string; p?: string; cp?: string }>>({});
-  // 实时股票详情数据（用于增强估值模型）
-  const [stockDetailData, setStockDetailData] = useState<Record<string, CompleteStockData>>({});
+  // 真实财务报表数据（localStorage 缓存，7 天刷新）
+  const [stockStatements, setStockStatements] = useState<Record<string, FinancialStatement[]>>({});
   const [stockDetailLoading, setStockDetailLoading] = useState<Record<string, boolean>>({});
   const [valuationResults, setValuationResults] = useState<Record<string, ValuationResult>>({});
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -946,97 +946,111 @@ export default function App() {
     return () => { clearInterval(timer); clearInterval(idxTimer); };
   }, [allCodesStr]);
 
-  // ─── 实时股票详情数据获取 ───
-  // 当用户进入公司详情页时，异步获取实时财务数据并计算增强估值
+  // ─── 真实财务报表数据获取 ───
+  // 进入公司详情页时，从 localStorage 缓存获取财务报表（无缓存则实时拉取）
   useEffect(() => {
     if (view !== 'comp' || !navArgs[0]) return;
     const code = String(navArgs[0]).trim();
     if (!code || stockDetailLoading[code]) return;
-    // 如果已经有数据且不超时，跳过
-    if (stockDetailData[code] && (Date.now() - stockDetailData[code].fetchedAt) < 60000) return;
 
     const doFetch = async () => {
       setStockDetailLoading(prev => ({ ...prev, [code]: true }));
       try {
-        // 找到公司所在行业以确定市场
-        let market: 'A' | 'HK' | 'GLOBAL' = 'A';
-        let staticFallback: any = undefined;
-        for (const ind of allIndustries) {
-          for (const sub of ind.l2) {
-            const found = sub.cs.find(c => c.c === code);
-            if (found) {
-              market = ind.market || 'A';
-              staticFallback = { pe: found.pe, pb: found.pb, roe: found.roe, dy: found.dy, ps: found.ps, n: found.n };
-              break;
-            }
-          }
-        }
-        // 也检查 custom companies
-        const customComp = customCompanies.find(c => c.c === code);
-        if (customComp && !staticFallback) {
-          market = customComp.market || 'A';
-          staticFallback = { pe: customComp.pe, pb: customComp.pb, roe: customComp.roe, dy: customComp.dy, ps: customComp.ps, n: customComp.n };
-        }
-
-        const data = await fetchStockDataCached(code, market, staticFallback);
-        // 用 batchData 中的实时数据补全
-        const bd = batchData[code];
-        if (bd) {
-          if (bd.revenueGrowth !== undefined && data.revenueGrowth === 0) data.revenueGrowth = bd.revenueGrowth;
-          if (bd.netIncomeGrowth !== undefined && data.netIncomeGrowth === 0) data.netIncomeGrowth = bd.netIncomeGrowth;
-          if (bd.dividendPerShare !== undefined) data.dividendPerShare = bd.dividendPerShare;
-          if (bd.eps !== undefined && data.eps === 0) data.eps = bd.eps;
-          if (bd.roa !== undefined && data.roa === 0) data.roa = bd.roa;
-          if (bd.grossMargin !== undefined && data.grossMargin === 0) data.grossMargin = bd.grossMargin;
-          if (bd.netMargin !== undefined && data.netMargin === 0) data.netMargin = bd.netMargin;
-          if (bd.debt !== undefined && data.totalDebt === 0) data.totalDebt = bd.debt;
-          if (bd.mcap !== undefined && data.mcap === 0) data.mcap = bd.mcap;
-        }
-        setStockDetailData(prev => ({ ...prev, [code]: data }));
-
-        // 计算增强估值
-        // 找行业 PE/PB/ROE（从 batchData 计算行业平均）
-        let industryPE = 20, industryPB = 1.5, industryROE = 12;
-        let industryName = '默认';
-        for (const ind of allIndustries) {
-          for (const sub of ind.l2) {
-            if (sub.cs.find(c => c.c === code)) {
-              industryName = ind.nm;
-              const peValues = sub.cs.map(c => batchData[c.c]?.pe).filter((v): v is number => v !== undefined && v > 0 && v < 500);
-              const pbValues = sub.cs.map(c => batchData[c.c]?.pb).filter((v): v is number => v !== undefined && v > 0 && v < 50);
-              const roeValues = sub.cs.map(c => batchData[c.c]?.roe).filter((v): v is number => v !== undefined && v > 0 && v < 100);
-              if (peValues.length > 0) industryPE = peValues.reduce((a, b) => a + b, 0) / peValues.length;
-              if (pbValues.length > 0) industryPB = pbValues.reduce((a, b) => a + b, 0) / pbValues.length;
-              if (roeValues.length > 0) industryROE = roeValues.reduce((a, b) => a + b, 0) / roeValues.length;
-              break;
-            }
-          }
-        }
-        if (data.pe > 0 && data.eps > 0) {
-          const stockInput: StockInput = {
-            code: data.code, name: data.name, market: market === 'HK' ? 'HK' : 'A',
-            price: data.price, pe: data.pe, pb: data.pb, ps: data.ps, dy: data.dy,
-            roe: data.roe, roa: data.roa, eps: data.eps, bvps: data.bvps,
-            mcap: data.mcap, fcap: data.fcap,
-            revenue: data.revenue, netIncome: data.netIncome,
-            operatingCF: data.operatingCF, freeCF: data.freeCF,
-            grossMargin: data.grossMargin, netMargin: data.netMargin,
-            totalDebt: data.totalDebt, dividendPerShare: data.dividendPerShare,
-            revenueGrowth: data.revenueGrowth, netIncomeGrowth: data.netIncomeGrowth,
-            history: data.history,
-          };
-          const industryData: IndustryData = { pe: industryPE, pb: industryPB, roe: industryROE, name: industryName };
-          const valuation = calculateValuation(stockInput, industryData, valuationConfig);
-          setValuationResults(prev => ({ ...prev, [code]: valuation }));
+        const stmts = await fetchFinancialStatementsCached(code);
+        if (stmts.length > 0) {
+          setStockStatements(prev => ({ ...prev, [code]: stmts }));
         }
       } catch (e) {
-        console.error('[StockDetail] Fetch error:', e);
+        console.error('[FinancialFetch] Error:', e);
       } finally {
         setStockDetailLoading(prev => ({ ...prev, [code]: false }));
       }
     };
     doFetch();
-  }, [view, navArgs[0], allIndustries, customCompanies]);
+  }, [view, navArgs[0]]);
+
+  // 进入公司详情页时，计算估值
+  useEffect(() => {
+    if (view !== 'comp' || !navArgs[0]) return;
+    const code = String(navArgs[0]).trim();
+    if (!code) return;
+
+    const stmts = stockStatements[code] || [];
+
+    // 收集行业信息
+    let market: 'A' | 'HK' | 'GLOBAL' = 'A';
+    let industryName = '默认';
+    let industryPE = 20, industryPB = 1.5, industryROE = 12;
+    let peers: Array<{ code: string; name: string; pe: number; pb: number; roe: number; mcap: number }> = [];
+
+    for (const ind of allIndustries) {
+      for (const sub of ind.l2) {
+        const found = sub.cs.find(c => c.c === code);
+        if (found) {
+          market = ind.market || 'A';
+          industryName = ind.nm;
+          const peValues = sub.cs.map(c => batchData[c.c]?.pe).filter((v): v is number => v !== undefined && v > 0 && v < 500);
+          const pbValues = sub.cs.map(c => batchData[c.c]?.pb).filter((v): v is number => v !== undefined && v > 0 && v < 50);
+          const roeValues = sub.cs.map(c => batchData[c.c]?.roe).filter((v): v is number => v !== undefined && v > 0 && v < 100);
+          if (peValues.length > 0) industryPE = peValues.reduce((a, b) => a + b, 0) / peValues.length;
+          if (pbValues.length > 0) industryPB = pbValues.reduce((a, b) => a + b, 0) / pbValues.length;
+          if (roeValues.length > 0) industryROE = roeValues.reduce((a, b) => a + b, 0) / roeValues.length;
+          peers = sub.cs.filter(x => x.c !== code).map(c => ({
+            code: c.c, name: c.n,
+            pe: batchData[c.c]?.pe || 0,
+            pb: batchData[c.c]?.pb || 0,
+            roe: batchData[c.c]?.roe || 0,
+            mcap: batchData[c.c]?.mcap || 0,
+          })).filter(p => p.pe > 0);
+          break;
+        }
+      }
+    }
+
+    // 从 batchData 获取实时指标
+    const bd = batchData[code] || {};
+    const currentPE = bd.pe || 0;
+    const currentPB = bd.pb || 0;
+    const currentEPS = bd.eps || 0;
+    const currentPrice = parseFloat(bd.p || '0') || 0;
+
+    if (currentPE <= 0 || currentPrice <= 0) return;
+
+    const stockInput: StockInput = {
+      code,
+      name: code,
+      market: market === 'HK' ? 'HK' : 'A',
+      price: currentPrice,
+      pe: currentPE,
+      pb: currentPB,
+      ps: bd.ps || 0,
+      dy: bd.dy || 0,
+      roe: bd.roe || 0,
+      roa: bd.roa || 0,
+      eps: currentEPS,
+      bvps: stmts.length > 0 ? stmts[0].bvps : 0,
+      mcap: bd.mcap || 0,
+      fcap: bd.fcap || 0,
+      revenue: stmts.length > 0 ? stmts[0].revenue : 0,
+      netIncome: stmts.length > 0 ? stmts[0].netIncome : 0,
+      operatingCF: stmts.length > 0 ? stmts[0].operatingCF : 0,
+      freeCF: stmts.length > 0 ? stmts[0].freeCF : 0,
+      grossMargin: stmts.length > 0 ? stmts[0].grossMargin : 0,
+      netMargin: stmts.length > 0 ? stmts[0].netMargin : 0,
+      totalDebt: bd.debt || (stmts.length > 0 ? stmts[0].debtRatio : 0),
+      dividendPerShare: bd.dividendPerShare || 0,
+      revenueGrowth: bd.revenueGrowth || (stmts.length > 0 ? stmts[0].revenueGrowth : 0),
+      netIncomeGrowth: bd.netIncomeGrowth || (stmts.length > 0 ? stmts[0].netIncomeGrowth : 0),
+      statements: stmts,
+    };
+
+    const industryData: IndustryData = {
+      pe: industryPE, pb: industryPB, roe: industryROE, name: industryName, peers,
+    };
+
+    const valuation = calculateValuation(stockInput, industryData, valuationConfig);
+    setValuationResults(prev => ({ ...prev, [code]: valuation }));
+  }, [view, navArgs[0], stockStatements, batchData]);
 
   // Fetch index valuation from danjuanfunds.com + eastmoney as fallback
   const allIndexCodes = indices.map(i => i.c).join(',');
@@ -1903,47 +1917,39 @@ export default function App() {
 
     const ii = currentIndustries.findIndex(i => i.id === ind?.id);
 
-    // ─── 数据源：优先使用实时获取的数据，回退到静态/批量数据 ───
-    const realtimeData = stockDetailData[tCode];
+    // ─── 数据源：batchData（实时行情） + 估值结果 ───
     const isLoading = stockDetailLoading[tCode];
     const valResult = valuationResults[tCode];
+    const stmts = stockStatements[tCode] || [];
 
-    const currentPE = realtimeData?.pe && realtimeData.pe > 0 ? realtimeData.pe
-      : (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
-    const currentPB = realtimeData?.pb && realtimeData.pb > 0 ? realtimeData.pb
-      : (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
-    const currentDY = realtimeData?.dy ? realtimeData.dy
-      : (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
-    const currentROE = realtimeData?.roe || batchData[tCode]?.roe || 0;
-    const currentEPS = realtimeData?.eps || batchData[tCode]?.eps || 0;
-    const currentBVPS = realtimeData?.bvps || 0;
-    const currentPrice = realtimeData?.price && realtimeData.price > 0 ? realtimeData.price
-      : ((livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0'));
-    // 新增：从 batchData 获取增长率和分红数据，供给 valuationService 使用
-    const bdRevenueGrowth = batchData[tCode]?.revenueGrowth;
-    const bdNetIncomeGrowth = batchData[tCode]?.netIncomeGrowth;
-    const bdDividendPerShare = batchData[tCode]?.dividendPerShare;
+    const currentPE = (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
+    const currentPB = (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
+    const currentDY = (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
+    const currentROE = batchData[tCode]?.roe || 0;
+    const currentEPS = batchData[tCode]?.eps || 0;
+    const currentBVPS = stmts.length > 0 ? stmts[0].bvps : 0;
+    const currentPrice = (livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0');
 
-    // ─── 增强估值（使用五维估值引擎）───
+    // ─── 估值结果提取 ───
     let dcfFair = { low: 0, mid: 0, high: 0 };
     let dcfImpliedPE = { low: 0, mid: 0, high: 0 };
     let relFairPE = { low: 0, mid: 0, high: 0 };
     let relFairPrice = { low: 0, mid: 0, high: 0 };
     let compositeFair = { low: 0, mid: 0, high: 0 };
     let compositeMargin = { low: 0, mid: 0, high: 0 };
-    let roicVal = 0, roicWacc = 0, roicSpread = 0, roicCreatesValue = false, roicQuality = 'average';
-    let assetFairPB = 0, assetFairPrice = 0, liquidationPrice = 0;
-    let impliedGrowthFcf: number | null = null, impliedGrowthEps: number | null = null;
-    let consensusGrowth: number | null = null;
+    let liquidationPrice = 0;
+    let impliedGrowth: number | null = null;
     let dcfWacc = 0, dcfPhases: any[] = [], dcfProjection: any[] = [], dcfTVRatio = 0, dcfBasis = 'fcf';
+    let dcfSensitivity: any[] = [];
     let relIndustryPE = 0, relHistoricalPE = 0, relPEGPE = 0, relPEG = 0;
+    let relHistoricalStats: any = undefined;
     let verdict: string = 'fair', verdictText = '—';
-    let modelWeights = { dcf: 0.30, relative: 0.30, roic: 0.20, asset: 0.20 };
+    let modelWeights = { dcf: 0.50, relative: 0.50 };
+    let moatSignals: any[] = [];
     let riskSignals: any[] = [];
     let valConfidence = 0;
 
     if (valResult && currentPE > 0) {
-      // 五维估值引擎结果
       dcfFair = valResult.dcf.fairValue;
       dcfImpliedPE = valResult.dcf.impliedPE;
       dcfWacc = valResult.dcf.wacc;
@@ -1951,6 +1957,7 @@ export default function App() {
       dcfProjection = valResult.dcf.projection;
       dcfTVRatio = valResult.dcf.terminalValueRatio;
       dcfBasis = valResult.dcf.usedBasis;
+      dcfSensitivity = valResult.dcf.sensitivity || [];
 
       relFairPE = valResult.relative.fairPE;
       relFairPrice = valResult.relative.fairPrice;
@@ -1958,27 +1965,17 @@ export default function App() {
       relHistoricalPE = valResult.relative.historicalFairPE;
       relPEGPE = valResult.relative.pegFairPE;
       relPEG = valResult.relative.peg;
-
-      roicVal = valResult.roic.roic;
-      roicWacc = valResult.roic.wacc;
-      roicSpread = valResult.roic.spread;
-      roicCreatesValue = valResult.roic.createsValue;
-      roicQuality = valResult.roic.quality;
-
-      assetFairPB = valResult.asset.fairPB;
-      assetFairPrice = valResult.asset.fairPrice;
-      liquidationPrice = valResult.asset.liquidationPrice;
-
-      impliedGrowthFcf = valResult.reverse.impliedGrowthRates.fcf;
-      impliedGrowthEps = valResult.reverse.impliedGrowthRates.eps;
-      consensusGrowth = valResult.reverse.consensusGrowth;
+      relHistoricalStats = valResult.relative.historicalPEStats;
 
       compositeFair = valResult.compositeFairValue;
       compositeMargin = valResult.marginOfSafety;
       verdict = valResult.verdict;
       verdictText = valResult.verdictText;
       modelWeights = valResult.modelWeights;
+      moatSignals = valResult.moatSignals;
       riskSignals = valResult.riskSignals;
+      liquidationPrice = valResult.liquidationPrice;
+      impliedGrowth = valResult.impliedGrowth;
       valConfidence = valResult.confidence;
     } else if (currentPE > 0) {
       // 回退简单估值
@@ -2069,14 +2066,14 @@ export default function App() {
             {currentPE > 0 ? (
               <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
                 <div>
-                  <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">五维估值综合</div>
+                  <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">估值综合</div>
                   <div className="text-lg font-bold text-indigo-600 tabular-nums">
                     {fairPrice > 0 ? `¥${fairPrice.toFixed(2)}` : '—'}
                     <span className="text-xs font-medium ml-1 opacity-70">PE {compositeFair.mid.toFixed(1)}x</span>
                   </div>
-                  {consensusGrowth !== null && (
+                  {impliedGrowth !== null && (
                     <div className="text-[10px] text-indigo-400 mt-1">
-                      市场隐含增长 {(consensusGrowth * 100).toFixed(1)}%
+                      市场隐含增长 {(impliedGrowth * 100).toFixed(1)}%
                     </div>
                   )}
                 </div>
@@ -2125,101 +2122,145 @@ export default function App() {
           </div>
 
           {currentPE > 0 && (
-            <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold text-indigo-600 flex items-center gap-1">
-                  <TrendingUp size={14} /> 五维估值系统
+                  <TrendingUp size={14} /> 估值分析
                 </h3>
                 <div className="flex items-center gap-2">
                   <button onClick={() => navigate('settings')} className="text-[9px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-500 font-bold hover:bg-indigo-100 transition-colors">
                     {activePreset ? VALUATION_PRESETS[activePreset].name : '自定义'} ⚙️
                   </button>
                   {isLoading && <Loader2 size={14} className="animate-spin text-indigo-400" />}
-                  {realtimeData && realtimeData.source === 'live' && (
-                    <span className="text-[9px] text-emerald-500 font-bold">● 实时</span>
+                  {stmts.length > 0 && (
+                    <span className="text-[9px] text-emerald-500 font-bold">● 真实财报</span>
                   )}
                 </div>
               </div>
 
-              {/* ① DCF */}
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">
-                  ① DCF 现金流折现
-                  <span className="text-[9px] ml-1 opacity-60">({(modelWeights.dcf * 100).toFixed(0)}%)</span>
-                </span>
-                <span className="font-mono font-bold text-slate-700">
-                  ¥{dcfFair.low.toFixed(1)}~{dcfFair.high.toFixed(1)}
-                </span>
+              {/* ① DCF 现金流折现 */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 font-medium">
+                    ① DCF 现金流折现
+                    <span className="text-[9px] ml-1 opacity-60">权重 {(modelWeights.dcf * 100).toFixed(0)}%</span>
+                  </span>
+                  <span className="font-mono font-bold text-slate-700">
+                    ¥{dcfFair.low.toFixed(1)} ~ ¥{dcfFair.high.toFixed(1)}
+                  </span>
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium leading-relaxed">
+                  WACC {(dcfWacc * 100).toFixed(1)}%
+                  {dcfPhases.map((p: any, i: number) => (
+                    <span key={i}> · 阶段{i+1} {(p.growth * 100).toFixed(1)}% × {p.years}年</span>
+                  ))}
+                  · 终值占比 {(dcfTVRatio * 100).toFixed(0)}%
+                  · 基准: {dcfBasis === 'fcf' ? '自由现金流' : dcfBasis === 'netIncome' ? '净利润' : 'EPS'}
+                </div>
+                {/* 敏感性分析：增长率 × 折现率 热力图 */}
+                {dcfSensitivity.length > 0 && (
+                  <div className="text-[9px] text-slate-400">
+                    <div className="font-medium mb-0.5">敏感性分析：</div>
+                    <div className="grid gap-px bg-slate-200 rounded-lg overflow-hidden" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                      <div className="bg-slate-100 px-1.5 py-1 text-center font-bold text-slate-500">增长率\\折现率</div>
+                      {[dcfSensitivity[1]?.wacc, dcfSensitivity[4]?.wacc, dcfSensitivity[7]?.wacc].filter(Boolean).map((w: number, i: number) => (
+                        <div key={i} className="bg-slate-100 px-1.5 py-1 text-center font-bold text-slate-500">{(w * 100).toFixed(1)}%</div>
+                      ))}
+                      {dcfSensitivity.filter((_: any, i: number) => i % 3 === 1).map((s: any, i: number) => (
+                        <React.Fragment key={i}>
+                          <div className="bg-white px-1.5 py-1 text-center font-bold text-slate-600">{(s.growth * 100).toFixed(1)}%</div>
+                          {dcfSensitivity.filter((x: any) => Math.abs(x.growth - s.growth) < 0.001).map((x: any, j: number) => (
+                            <div key={j} className={`bg-white px-1.5 py-1 text-center font-mono font-bold ${
+                              x.value > currentPrice * 1.2 ? 'text-emerald-600' :
+                              x.value < currentPrice * 0.8 ? 'text-red-500' : 'text-slate-700'
+                            }`}>
+                              ¥{x.value.toFixed(0)}
+                            </div>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="text-[9px] text-slate-400 font-medium">
-                WACC {(dcfWacc * 100).toFixed(1)}%
-                {dcfPhases.map((p: any, i: number) => (
-                  <span key={i}> · 阶段{i+1}{(p.growth * 100).toFixed(1)}%×{p.years}年</span>
-                ))}
-                · 终值占比 {(dcfTVRatio * 100).toFixed(0)}%
-                · 基准: {dcfBasis === 'fcf' ? 'FCF' : dcfBasis === 'netIncome' ? '净利润' : 'EPS'}
-              </div>
-              <div className="border-b border-slate-200 my-1" />
+              <div className="border-b border-slate-200" />
 
-              {/* ② PE 相对 */}
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">
-                  ② PE 相对估值
-                  <span className="text-[9px] ml-1 opacity-60">({(modelWeights.relative * 100).toFixed(0)}%)</span>
-                </span>
-                <span className="font-mono font-bold text-slate-700">PE {relFairPE.low.toFixed(1)}~{relFairPE.high.toFixed(1)}x</span>
+              {/* ② PE 相对估值 */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 font-medium">
+                    ② PE 相对估值
+                    <span className="text-[9px] ml-1 opacity-60">权重 {(modelWeights.relative * 100).toFixed(0)}%</span>
+                  </span>
+                  <span className="font-mono font-bold text-slate-700">
+                    PE {relFairPE.low.toFixed(1)} ~ {relFairPE.high.toFixed(1)}x → ¥{relFairPrice.low.toFixed(1)} ~ ¥{relFairPrice.high.toFixed(1)}
+                  </span>
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium leading-relaxed">
+                  行业PE {relIndustryPE.toFixed(1)} · 历史修正PE {relHistoricalPE.toFixed(1)} · PEG {relPEG.toFixed(2)} (合理PE {relPEGPE.toFixed(1)})
+                </div>
+                {/* 历史 PE 百分位条 */}
+                {relHistoricalStats && (
+                  <div className="flex items-center gap-2 text-[9px]">
+                    <span className="text-slate-400 whitespace-nowrap">PE {relHistoricalStats.min.toFixed(1)}</span>
+                    <div className="flex-1 h-2 bg-slate-200 rounded-full relative">
+                      <div className="absolute h-full bg-gradient-to-r from-emerald-200 via-amber-200 to-red-200 rounded-full" style={{ width: '100%' }} />
+                      <div className="absolute top-0 h-full w-0.5 bg-indigo-600 rounded" style={{ left: `${relHistoricalStats.percentile * 100}%` }} title={`当前 PE ${relHistoricalStats.current.toFixed(1)}`} />
+                    </div>
+                    <span className="text-slate-400 whitespace-nowrap">{relHistoricalStats.max.toFixed(1)}</span>
+                    <span className={`font-bold ${relHistoricalStats.percentile < 0.3 ? 'text-emerald-600' : relHistoricalStats.percentile > 0.7 ? 'text-red-500' : 'text-amber-600'}`}>
+                      {(relHistoricalStats.percentile * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="text-[9px] text-slate-400 font-medium">
-                行业PE {relIndustryPE.toFixed(1)} · 历史PE {relHistoricalPE.toFixed(1)} · PEG {relPEG.toFixed(2)} (PE {relPEGPE.toFixed(1)})
-              </div>
-              <div className="border-b border-slate-200 my-1" />
+              <div className="border-b border-slate-200" />
 
-              {/* ③ ROIC 质量 */}
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">
-                  ③ ROIC 质量模型
-                  <span className="text-[9px] ml-1 opacity-60">({(modelWeights.roic * 100).toFixed(0)}%)</span>
-                </span>
-                <span className={`font-mono font-bold ${roicCreatesValue ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {roicVal.toFixed(1)}% {roicCreatesValue ? '✓创造价值' : '✗未创造价值'}
-                </span>
-              </div>
-              <div className="text-[9px] text-slate-400 font-medium">
-                ROIC {roicVal.toFixed(1)}% − WACC {roicWacc.toFixed(1)}% = 利差 {roicSpread.toFixed(1)}%
-                · 质量: {roicQuality === 'excellent' ? '优秀' : roicQuality === 'good' ? '良好' : roicQuality === 'average' ? '一般' : '较差'}
-                · 估值调整 ×{valResult?.roic.valuationMultiplier.toFixed(2) || '1.00'}
-              </div>
-              <div className="border-b border-slate-200 my-1" />
-
-              {/* ④ 资产估值 */}
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">
-                  ④ 资产估值
-                  <span className="text-[9px] ml-1 opacity-60">({(modelWeights.asset * 100).toFixed(0)}%)</span>
-                </span>
-                <span className="font-mono font-bold text-slate-700">PB {assetFairPB.toFixed(2)}x → ¥{assetFairPrice.toFixed(2)}</span>
-              </div>
-              <div className="text-[9px] text-slate-400 font-medium">
-                清算底线 ¥{liquidationPrice.toFixed(2)} · 当前PB {currentPB.toFixed(2)}
-              </div>
-              <div className="border-b border-slate-200 my-1" />
-
-              {/* ⑤ 市场预期反推 */}
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">⑤ 市场预期反推</span>
-                <span className="font-mono font-bold text-slate-700">
-                  {consensusGrowth !== null ? `隐含增长 ${(consensusGrowth * 100).toFixed(1)}%` : '数据不足'}
-                </span>
-              </div>
-              {(impliedGrowthFcf !== null || impliedGrowthEps !== null) && (
-                <div className="text-[9px] text-slate-400 font-medium">
-                  {impliedGrowthFcf !== null && <span>FCF隐含 {(impliedGrowthFcf * 100).toFixed(1)}% </span>}
-                  {impliedGrowthEps !== null && <span>EPS隐含 {(impliedGrowthEps * 100).toFixed(1)}% </span>}
+              {/* 辅助信号 */}
+              {moatSignals.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-bold text-slate-500">护城河评分</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {moatSignals.map((ms: any, i: number) => (
+                      <div key={i} className="bg-white rounded-xl p-2 border border-slate-100">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-medium text-slate-600">{ms.label}</span>
+                          <span className={`text-[10px] font-bold ${
+                            ms.level === 'strong' ? 'text-emerald-600' : ms.level === 'good' ? 'text-blue-600' : ms.level === 'average' ? 'text-amber-600' : 'text-red-500'
+                          }`}>{ms.score}</span>
+                        </div>
+                        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${
+                            ms.level === 'strong' ? 'bg-emerald-500' : ms.level === 'good' ? 'bg-blue-500' : ms.level === 'average' ? 'bg-amber-500' : 'bg-red-400'
+                          }`} style={{ width: `${ms.score}%` }} />
+                        </div>
+                        <div className="text-[8px] text-slate-400 mt-0.5 truncate" title={ms.detail}>{ms.detail}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
+              {/* 清算底线 + 市场预期 */}
+              <div className="grid grid-cols-2 gap-2">
+                {liquidationPrice > 0 && (
+                  <div className="bg-white rounded-xl p-2.5 border border-slate-100 text-center">
+                    <div className="text-[9px] text-slate-400 font-bold mb-0.5">清算底线</div>
+                    <div className="text-sm font-bold text-slate-700">¥{liquidationPrice.toFixed(2)}</div>
+                    <div className="text-[8px] text-slate-400">0.7 × 每股净资产</div>
+                  </div>
+                )}
+                {impliedGrowth !== null && (
+                  <div className="bg-white rounded-xl p-2.5 border border-slate-100 text-center">
+                    <div className="text-[9px] text-slate-400 font-bold mb-0.5">市场隐含增长</div>
+                    <div className="text-sm font-bold text-indigo-600">{(impliedGrowth * 100).toFixed(1)}%</div>
+                    <div className="text-[8px] text-slate-400">当前股价暗含的年化增速</div>
+                  </div>
+                )}
+              </div>
+
               {/* 综合结果 */}
-              <div className="border-t-2 border-slate-200 pt-2 space-y-1">
+              <div className="border-t-2 border-slate-200 pt-2.5 space-y-1.5">
                 <div className="flex justify-between text-xs font-bold">
                   <span className="text-slate-800">估值区间</span>
                   <span className="text-indigo-600">
@@ -2230,23 +2271,17 @@ export default function App() {
                   <span className="text-slate-500">当前价</span>
                   <span className="text-slate-700">¥{currentPrice.toFixed(2)}</span>
                 </div>
-                {fairPrice > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">合理价格 (中值)</span>
-                    <span className="font-mono text-indigo-600">¥{fairPrice.toFixed(2)}</span>
-                  </div>
-                )}
                 <div className="flex justify-between text-xs font-bold">
                   <span className="text-slate-800">安全边际</span>
-                  <span className={margin > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                    {margin > 0 ? '+' : ''}{margin.toFixed(1)}%
+                  <span className={compositeMargin.mid > 0 ? 'text-emerald-600' : 'text-red-600'}>
+                    {compositeMargin.mid > 0 ? '+' : ''}{compositeMargin.mid.toFixed(1)}%
                   </span>
                 </div>
               </div>
 
               {/* 风险信号 */}
               {riskSignals.length > 0 && (
-                <div className="mt-2 space-y-1">
+                <div className="space-y-1 pt-1">
                   {riskSignals.map((s: any, i: number) => (
                     <div key={i} className={`text-[10px] font-medium flex items-center gap-1 ${
                       s.level === 'danger' ? 'text-red-500' : s.level === 'warning' ? 'text-amber-500' : 'text-slate-400'
@@ -2257,32 +2292,34 @@ export default function App() {
                 </div>
               )}
 
-              {/* 实时财务数据摘要 */}
-              {realtimeData && realtimeData.source === 'live' && (
-                <div className="mt-3 pt-3 border-t border-slate-200 space-y-1">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">实时财务数据</div>
+              {/* 真实财务数据摘要 */}
+              {stmts.length > 0 && (
+                <div className="mt-2 pt-3 border-t border-slate-200 space-y-1">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">最新财报 ({stmts[0].reportDate?.substring(0, 10) || stmts[0].year})</div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px]">
-                    {realtimeData.revenue > 0 && <div className="flex justify-between"><span className="text-slate-400">营收</span><span className="font-mono text-slate-600">{realtimeData.revenue.toFixed(1)}亿</span></div>}
-                    {realtimeData.netIncome > 0 && <div className="flex justify-between"><span className="text-slate-400">净利润</span><span className="font-mono text-slate-600">{realtimeData.netIncome.toFixed(1)}亿</span></div>}
-                    {realtimeData.grossMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">毛利率</span><span className="font-mono text-slate-600">{realtimeData.grossMargin.toFixed(1)}%</span></div>}
-                    {realtimeData.netMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">净利率</span><span className="font-mono text-slate-600">{realtimeData.netMargin.toFixed(1)}%</span></div>}
-                    {realtimeData.roa > 0 && <div className="flex justify-between"><span className="text-slate-400">ROA</span><span className="font-mono text-slate-600">{realtimeData.roa.toFixed(1)}%</span></div>}
-                    {realtimeData.totalDebt > 0 && <div className="flex justify-between"><span className="text-slate-400">资产负债率</span><span className="font-mono text-slate-600">{realtimeData.totalDebt.toFixed(1)}%</span></div>}
-                    {realtimeData.revenueGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">营收增长</span><span className={`font-mono ${realtimeData.revenueGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{realtimeData.revenueGrowth >= 0 ? '+' : ''}{realtimeData.revenueGrowth.toFixed(1)}%</span></div>}
-                    {realtimeData.netIncomeGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">利润增长</span><span className={`font-mono ${realtimeData.netIncomeGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{realtimeData.netIncomeGrowth >= 0 ? '+' : ''}{realtimeData.netIncomeGrowth.toFixed(1)}%</span></div>}
+                    {stmts[0].revenue > 0 && <div className="flex justify-between"><span className="text-slate-400">营收</span><span className="font-mono text-slate-600">{stmts[0].revenue.toFixed(1)}亿</span></div>}
+                    {stmts[0].netIncome > 0 && <div className="flex justify-between"><span className="text-slate-400">净利润</span><span className="font-mono text-slate-600">{stmts[0].netIncome.toFixed(1)}亿</span></div>}
+                    {stmts[0].grossMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">毛利率</span><span className="font-mono text-slate-600">{stmts[0].grossMargin.toFixed(1)}%</span></div>}
+                    {stmts[0].netMargin > 0 && <div className="flex justify-between"><span className="text-slate-400">净利率</span><span className="font-mono text-slate-600">{stmts[0].netMargin.toFixed(1)}%</span></div>}
+                    {stmts[0].roe > 0 && <div className="flex justify-between"><span className="text-slate-400">ROE</span><span className="font-mono text-slate-600">{stmts[0].roe.toFixed(1)}%</span></div>}
+                    {stmts[0].debtRatio > 0 && <div className="flex justify-between"><span className="text-slate-400">资产负债率</span><span className="font-mono text-slate-600">{stmts[0].debtRatio.toFixed(1)}%</span></div>}
+                    {stmts[0].operatingCF > 0 && <div className="flex justify-between"><span className="text-slate-400">经营现金流</span><span className="font-mono text-slate-600">{stmts[0].operatingCF.toFixed(1)}亿</span></div>}
+                    {stmts[0].freeCF !== 0 && <div className="flex justify-between"><span className="text-slate-400">自由现金流</span><span className={`font-mono ${stmts[0].freeCF >= 0 ? 'text-slate-600' : 'text-red-500'}`}>{stmts[0].freeCF.toFixed(1)}亿</span></div>}
+                    {stmts[0].revenueGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">营收增长</span><span className={`font-mono ${stmts[0].revenueGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{stmts[0].revenueGrowth >= 0 ? '+' : ''}{stmts[0].revenueGrowth.toFixed(1)}%</span></div>}
+                    {stmts[0].netIncomeGrowth !== 0 && <div className="flex justify-between"><span className="text-slate-400">利润增长</span><span className={`font-mono ${stmts[0].netIncomeGrowth >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{stmts[0].netIncomeGrowth >= 0 ? '+' : ''}{stmts[0].netIncomeGrowth.toFixed(1)}%</span></div>}
                   </div>
                 </div>
               )}
 
-              {/* 历史利润趋势图 */}
-              {realtimeData?.history && realtimeData.history.years.length >= 2 && (
-                <div className="mt-3 pt-3 border-t border-slate-200">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">历年利润趋势</div>
+              {/* 历年利润趋势图 */}
+              {stmts.length >= 2 && (
+                <div className="mt-2 pt-3 border-t border-slate-200">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">历年趋势</div>
                   <ResponsiveContainer width="100%" height={120}>
-                    <BarChart data={[...realtimeData.history.years].reverse().map((y, i) => ({
-                      year: y,
-                      profit: [...realtimeData.history!.netIncomes].reverse()[i],
-                      revenue: [...realtimeData.history!.revenues].reverse()[i],
+                    <BarChart data={[...stmts].reverse().map(s => ({
+                      year: s.year,
+                      profit: s.netIncome,
+                      revenue: s.revenue,
                     }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="year" tick={{ fontSize: 9, fill: '#94a3b8' }} />
@@ -3186,13 +3223,6 @@ export default function App() {
       localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
       localStorage.removeItem('iv_val_preset');
     };
-    const updateGordon = (key: string, val: number) => {
-      const newCfg = { ...valuationConfig, gordon: { ...valuationConfig.gordon, [key]: val } };
-      setValuationConfig(newCfg);
-      setActivePreset(null);
-      localStorage.setItem('iv_val_cfg', JSON.stringify(newCfg));
-      localStorage.removeItem('iv_val_preset');
-    };
     const applyPreset = (name: PresetName) => {
       const cfg = VALUATION_PRESETS[name].config;
       setValuationConfig(cfg);
@@ -3343,24 +3373,15 @@ export default function App() {
               <Slider label="增长权重 (PEG)" value={valuationConfig.pe.growthWeight} min={0.1} max={0.5} step={0.05} unit="" onChange={v => updatePE('growthWeight', v)} />
             </div>
 
-            {/* ③ ROIC 质量 & ④ 资产估值 — 自动计算 */}
+            {/* 辅助信号说明 */}
             <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">③ ROIC 质量模型 / ④ 资产估值</h3>
+              <h3 className="text-xs font-bold text-indigo-600">辅助信号（自动计算）</h3>
               <div className="text-[10px] text-slate-500 space-y-1.5 leading-relaxed">
-                <p>• <b>ROIC</b> = NOPAT / 投入资本，与 WACC 比较判断是否创造经济价值，输出 0.5~1.5 估值调整系数</p>
-                <p>• <b>资产估值</b> = 行业合理 PB × ROE修正 × 每股净资产，同时计算 0.7×BVPS 清算底线</p>
-                <p>• 两个模型参数由公司财务数据自动驱动，无需手动设置</p>
-                <p>• 动态权重：高成长→DCF↑，成熟低增长→PE↑，ROIC差→打折，重资产→资产估值↑</p>
-              </div>
-            </div>
-
-            {/* ⑤ 市场预期反推 — 说明 */}
-            <div className="card-elevated p-4 space-y-3">
-              <h3 className="text-xs font-bold text-indigo-600">⑤ 市场预期反推</h3>
-              <div className="text-[10px] text-slate-500 space-y-1.5 leading-relaxed">
-                <p>• 根据当前股价，用二分法反推市场隐含的年化增长率</p>
-                <p>• 分别用 FCF 和 EPS 两个基准计算，加权输出共识增长率</p>
-                <p>• 与你的增长假设对比：你的假设 &gt; 市场隐含 → 可能低估，反之可能高估</p>
+                <p>• <b>护城河评分</b>：基于真实财报 — ROE 连续性、现金流质量（经营CF/净利润）、增长质量、负债安全</p>
+                <p>• <b>清算底线</b>：0.7 × 每股净资产，股价低于此值有资产支撑</p>
+                <p>• <b>市场隐含增长</b>：用二分法从当前股价反推市场预期的年化增长率</p>
+                <p>• <b>敏感性分析</b>：DCF 对增长率和折现率假设的敏感度矩阵</p>
+                <p>• 财务数据来自东方财富三表（利润表+资产负债表+现金流量表），本地缓存 7 天</p>
               </div>
             </div>
 
