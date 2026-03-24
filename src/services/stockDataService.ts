@@ -1,18 +1,22 @@
 /**
- * 实时财务数据服务
- * 从东方财富获取股票实时行情和财务指标
- * 使用 JSONP 避免 CORS 问题
+ * 股票财务数据服务
+ *
+ * 数据分两层：
+ * 1. 实时行情（PE/PB/价格/涨跌幅）— 通过 App.tsx 中的 JSONP 10s 轮询
+ * 2. 财务报表（三表数据）— 通过本模块获取，存 localStorage，7 天刷新一次
+ *
+ * 数据源：东方财富 datacenter JSONP API
  */
 
-import type { DataQuality } from '../types';
+import type { FinancialStatement, CachedValuationData } from '../valuation/types';
 
-// ─── JSONP 工具函数 ───
+// ─── JSONP 工具 ───
 
-function jsonp(url: string, callbackName: string, timeoutMs = 8000): Promise<any> {
+function jsonp(url: string, callbackName: string, timeoutMs = 10000): Promise<any> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`JSONP timeout: ${url}`));
+      reject(new Error(`JSONP timeout`));
     }, timeoutMs);
 
     const cleanup = () => {
@@ -30,335 +34,267 @@ function jsonp(url: string, callbackName: string, timeoutMs = 8000): Promise<any
     const script = document.createElement('script');
     script.id = callbackName;
     script.src = url;
-    script.onerror = () => {
-      cleanup();
-      reject(new Error(`JSONP load error: ${url}`));
-    };
+    script.onerror = () => { cleanup(); reject(new Error('JSONP load error')); };
     document.head.appendChild(script);
   });
 }
 
-// ─── 数据类型 ───
+// ─── 东方财富：利润表 + 关键指标 ───
 
-export interface CompleteStockData {
-  code: string;
-  name: string;
-  price: number;
-  changePct: number;
-  pe: number;
-  pb: number;
-  ps: number;
-  dy: number;
-  roe: number;
-  roa: number;
-  eps: number;
-  bvps: number;
-  mcap: number;         // 总市值（亿）
-  fcap: number;         // 流通市值（亿）
-  // 财务数据
-  revenue: number;      // 营收（亿）
-  netIncome: number;    // 净利润（亿）
-  operatingCF: number;  // 经营现金流（亿）
-  freeCF: number;       // 自由现金流（亿）
-  revenueGrowth: number;
-  netIncomeGrowth: number;
-  grossMargin: number;
-  netMargin: number;
-  totalDebt: number;
-  dividendPerShare: number;
-  payoutRatio: number;
-  // 历史数据
-  history: FinancialSummary | null;
-  // 元数据
-  source: 'live' | 'cached' | 'static';
-  fetchedAt: number;
-  // 数据质量追踪
-  dataQuality: DataQuality;
+async function fetchMainFinanceData(code: string): Promise<any[]> {
+  const cbName = `fin_main_${code}_${Date.now()}`;
+  const filter = `(SECURITY_CODE="${code}")`;
+  const columns = [
+    'SECURITY_CODE', 'REPORT_DATE',
+    'BASIC_EPS', 'WEIGHTAVG_ROE',
+    'OPERATE_INCOME', 'TOTAL_OPERATE_INCOME',
+    'OPERATE_COST', 'OPERATE_EXPENSE',
+    'PARENT_NETPROFIT', 'YSTZ', 'SJLTZ',
+    'TOI_SAME', 'PARENT_SAME',
+    'ASSIGNDSCRPT', 'NETPROFIT',
+  ].join(',');
+  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
+  const data = await jsonp(url, cbName);
+  return data?.result?.data || [];
 }
 
-export interface FinancialSummary {
-  years: string[];
-  revenues: number[];
-  netIncomes: number[];
-  operatingCFs: number[];
-  freeCFs: number[];
-  roes: number[];
-  epses: number[];
-  dividends: number[];
-  payoutRatios: number[];
-  revenueGrowths: number[];
-  netIncomeGrowths: number[];
-}
+// ─── 东方财富：现金流量表 ───
 
-// ─── 东方财富实时行情（JSONP）───
+async function fetchCashFlowData(code: string): Promise<Map<string, { operatingCF: number; investingCF: number; financingCF: number; capex: number; dividendPaid: number }>> {
+  const result = new Map<string, { operatingCF: number; investingCF: number; financingCF: number; capex: number; dividendPaid: number }>();
 
-/**
- * 获取单只股票实时估值数据
- * 使用 push2.eastmoney.com JSONP 接口
- */
-async function fetchEastmoneyQuote(code: string, market: 'A' | 'HK'): Promise<Partial<CompleteStockData> | null> {
   try {
-    const mk = market === 'A'
-      ? (code.startsWith('6') ? '1' : '0')
-      : '116';
-    const secid = `${mk}.${code}`;
-
-    const cbName = `em_quote_${code}_${Date.now()}`;
-    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f20,f23,f37,f52,f57,f58,f69,f98,f99,f100,f116,f117,f162,f167,f168,f170,f173,f177,f183,f184,f185,f186,f187,f188,f137,f138&cb=${cbName}`;
-
-    const data = await jsonp(url, cbName);
-    const d = data?.data;
-    if (!d) return null;
-
-    const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
-    const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
-    const priceDiv = 100;
-    const price = d.f2 != null ? d.f2 / priceDiv : 0;
-
-    return {
-      code,
-      name: d.f58 || '',
-      price,
-      changePct: val(d.f170, 100) || val(d.f3, 100) || 0,
-      pe: valPos(d.f162, 100) || valPos(d.f9, 100) || 0,
-      pb: valPos(d.f167, 100) || valPos(d.f23, 100) || 0,
-      ps: valPos(d.f188, 100) || 0,
-      dy: valPos(d.f177, 100) || 0,
-      roe: val(d.f183, 100) || val(d.f37) || 0,
-      roa: val(d.f184, 100) || 0,
-      eps: valPos(d.f168, 100) || 0,
-      bvps: valPos(d.f23, 100) || 0,
-      mcap: valPos(d.f20, 100000000) || valPos(d.f57, 100000000) || 0,
-      fcap: valPos(d.f117, 100000000) || 0,
-      grossMargin: val(d.f185, 100) || 0,
-      netMargin: val(d.f186, 100) || 0,
-      totalDebt: val(d.f52, 100) || 0,
-      revenueGrowth: val(d.f98, 100) || 0,
-      netIncomeGrowth: val(d.f99, 100) || 0,
-      dividendPerShare: val(d.f69) || 0,
-    };
-  } catch (e) {
-    console.error(`[fetchEastmoneyQuote] Error for ${code}:`, e);
-    return null;
-  }
-}
-
-/**
- * 获取财务摘要数据（多年度）
- * 使用 datacenter.eastmoney.com 接口
- */
-async function fetchFinancialHistory(code: string, market: 'A' | 'HK'): Promise<FinancialSummary | null> {
-  try {
-    const cbName = `em_fin_${code}_${Date.now()}`;
+    const cbName = `fin_cf_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=SECURITY_CODE,REPORT_DATE,BASIC_EPS,WEIGHTAVG_ROE,OPERATE_INCOME,PARENT_NETPROFIT,YSTZ,SJLTZ,MGJYXJJE,ASSIGNDSCRPT&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
-
-    const data = await jsonp(url, cbName, 10000);
-    const items = data?.result?.data;
-    if (!items || items.length === 0) return null;
-
-    const summary: FinancialSummary = {
-      years: [],
-      revenues: [],
-      netIncomes: [],
-      operatingCFs: [],
-      freeCFs: [],
-      roes: [],
-      epses: [],
-      dividends: [],
-      payoutRatios: [],
-      revenueGrowths: [],
-      netIncomeGrowths: [],
-    };
+    // 现金流量表关键字段
+    const columns = 'SECURITY_CODE,REPORT_DATE,NETCASH_OPERATE,NETCASH_INVEST,NETCASH_FINANCE,CASH_RELATED,PURCHASE_FIXED_ASSETS,CONSTRUCT_FIXED_ASSETS,DIV_PROF_INTEREST_PAID';
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GCASHFLOW&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
+    const data = await jsonp(url, cbName);
+    const items = data?.result?.data || [];
 
     for (const item of items) {
-      summary.years.push(item.REPORT_DATE?.substring(0, 4) || '');
-      summary.revenues.push((item.OPERATE_INCOME || 0) / 100000000);
-      summary.netIncomes.push((item.PARENT_NETPROFIT || 0) / 100000000);
-      summary.roes.push(item.WEIGHTAVG_ROE || 0);
-      summary.epses.push(item.BASIC_EPS || 0);
-      summary.revenueGrowths.push(item.YSTZ || 0);
-      summary.netIncomeGrowths.push(item.SJLTZ || 0);
-      summary.operatingCFs.push(0);
-      summary.freeCFs.push(0);
-      summary.dividends.push(0);
-      summary.payoutRatios.push(0);
-    }
+      const year = (item.REPORT_DATE || '').substring(0, 4);
+      if (!year) continue;
 
-    return summary;
-  } catch (e) {
-    console.error(`[fetchFinancialHistory] Error for ${code}:`, e);
-    return null;
-  }
-}
+      const operatingCF = (item.NETCASH_OPERATE || 0) / 1e8;
+      const investingCF = (item.NETCASH_INVEST || 0) / 1e8;
+      const financingCF = (item.NETCASH_FINANCE || 0) / 1e8;
+      // 资本支出：购建固定资产等
+      const capex = Math.abs(((item.PURCHASE_FIXED_ASSETS || 0) + (item.CONSTRUCT_FIXED_ASSETS || 0)) / 1e8);
+      // 分红支出
+      const dividendPaid = Math.abs((item.DIV_PROF_INTEREST_PAID || 0) / 1e8);
 
-// ─── 数据质量评估 ───
-
-function assessDataQuality(data: CompleteStockData, quoteOk: boolean, historyOk: boolean): DataQuality {
-  const missingFields: string[] = [];
-
-  // 检查关键估值字段
-  if (!data.price || data.price <= 0) missingFields.push('price');
-  if (!data.pe || data.pe <= 0) missingFields.push('pe');
-  if (!data.pb || data.pb <= 0) missingFields.push('pb');
-  if (!data.eps || data.eps <= 0) missingFields.push('eps');
-  if (!data.roe || data.roe <= 0) missingFields.push('roe');
-  if (!data.mcap || data.mcap <= 0) missingFields.push('mcap');
-
-  // 检查历史数据
-  if (!historyOk) missingFields.push('history');
-
-  // 检查增长率
-  if (!data.revenueGrowth && !data.netIncomeGrowth) missingFields.push('growth');
-
-  // 信心评级
-  let confidence: 'high' | 'medium' | 'low';
-  if (missingFields.length === 0 && quoteOk && historyOk) {
-    confidence = 'high';
-  } else if (missingFields.length <= 3 && quoteOk) {
-    confidence = 'medium';
-  } else {
-    confidence = 'low';
-  }
-
-  return { quoteOk, historyOk, missingFields, confidence };
-}
-
-// ─── 合并数据源 ───
-
-/**
- * 获取一只股票的完整数据
- * 并行获取：实时行情 + 财务历史
- */
-export async function fetchCompleteStockData(
-  code: string,
-  market: 'A' | 'HK' | 'GLOBAL',
-  staticFallback?: { pe?: number; pb?: number; roe?: number; dy?: number; ps?: number; n?: string }
-): Promise<CompleteStockData> {
-  const result: CompleteStockData = {
-    code,
-    name: staticFallback?.n || '',
-    price: 0,
-    changePct: 0,
-    pe: staticFallback?.pe || 0,
-    pb: staticFallback?.pb || 0,
-    ps: staticFallback?.ps || 0,
-    dy: staticFallback?.dy || 0,
-    roe: staticFallback?.roe || 0,
-    roa: 0,
-    eps: 0,
-    bvps: 0,
-    mcap: 0,
-    fcap: 0,
-    revenue: 0,
-    netIncome: 0,
-    operatingCF: 0,
-    freeCF: 0,
-    revenueGrowth: 0,
-    netIncomeGrowth: 0,
-    grossMargin: 0,
-    netMargin: 0,
-    totalDebt: 0,
-    dividendPerShare: 0,
-    payoutRatio: 0,
-    history: null,
-    source: 'static',
-    fetchedAt: Date.now(),
-    dataQuality: { quoteOk: false, historyOk: false, missingFields: [], confidence: 'low' },
-  };
-
-  if (market === 'GLOBAL') {
-    result.dataQuality = assessDataQuality(result, false, false);
-    return result;
-  }
-
-  let quoteOk = false;
-  let historyOk = false;
-
-  try {
-    // 并行获取
-    const [quoteResult, historyResult] = await Promise.allSettled([
-      fetchEastmoneyQuote(code, market as 'A' | 'HK'),
-      fetchFinancialHistory(code, market as 'A' | 'HK'),
-    ]);
-
-    // 合并实时行情
-    if (quoteResult.status === 'fulfilled' && quoteResult.value) {
-      quoteOk = true;
-      const q = quoteResult.value;
-      if (q.price && q.price > 0) {
-        result.price = q.price;
-        result.source = 'live';
-      }
-      result.name = result.name || q.name || '';
-      if (q.changePct) result.changePct = q.changePct;
-      if (q.pe && q.pe > 0) result.pe = q.pe;
-      if (q.pb && q.pb > 0) result.pb = q.pb;
-      if (q.ps && q.ps > 0) result.ps = q.ps;
-      if (q.dy) result.dy = q.dy;
-      if (q.roe) result.roe = q.roe;
-      if (q.roa) result.roa = q.roa;
-      if (q.eps && q.eps > 0) result.eps = q.eps;
-      if (q.bvps && q.bvps > 0) result.bvps = q.bvps;
-      if (q.mcap && q.mcap > 0) result.mcap = q.mcap;
-      if (q.fcap && q.fcap > 0) result.fcap = q.fcap;
-      if (q.grossMargin) result.grossMargin = q.grossMargin;
-      if (q.netMargin) result.netMargin = q.netMargin;
-      if (q.totalDebt) result.totalDebt = q.totalDebt;
-      if (q.revenueGrowth) result.revenueGrowth = q.revenueGrowth;
-      if (q.netIncomeGrowth) result.netIncomeGrowth = q.netIncomeGrowth;
-      if (q.dividendPerShare) result.dividendPerShare = q.dividendPerShare;
-    }
-
-    // 合并历史数据
-    if (historyResult.status === 'fulfilled' && historyResult.value) {
-      historyOk = true;
-      result.history = historyResult.value;
-      const h = historyResult.value;
-
-      // 用最新历史数据补全
-      if (h.roes.length > 0 && h.roes[0] > 0 && result.roe === 0) result.roe = h.roes[0];
-      if (h.epses.length > 0 && h.epses[0] > 0 && result.eps === 0) result.eps = h.epses[0];
-      if (h.revenues.length > 0) result.revenue = h.revenues[0];
-      if (h.netIncomes.length > 0) result.netIncome = h.netIncomes[0];
-
-      // 计算增长率
-      if (h.netIncomes.length >= 2 && h.netIncomes[1] !== 0) {
-        result.netIncomeGrowth = ((h.netIncomes[0] - h.netIncomes[1]) / Math.abs(h.netIncomes[1])) * 100;
-      }
-      if (h.revenues.length >= 2 && h.revenues[1] !== 0) {
-        result.revenueGrowth = ((h.revenues[0] - h.revenues[1]) / Math.abs(h.revenues[1])) * 100;
-      }
-
-      result.source = result.source === 'live' ? 'live' : 'cached';
+      result.set(year, { operatingCF, investingCF, financingCF, capex, dividendPaid });
     }
   } catch (e) {
-    console.error(`[fetchCompleteStockData] Error for ${code}:`, e);
+    console.warn(`[fetchCashFlowData] Failed for ${code}:`, e);
   }
 
-  result.dataQuality = assessDataQuality(result, quoteOk, historyOk);
   return result;
 }
 
-// ─── 缓存管理 ───
+// ─── 东方财富：资产负债表 ───
 
-const stockCache = new Map<string, { data: CompleteStockData; expiresAt: number }>();
-const CACHE_TTL = 60_000; // 1 分钟
+async function fetchBalanceSheetData(code: string): Promise<Map<string, { totalAssets: number; totalEquity: number; totalDebt: number; bvps: number }>> {
+  const result = new Map<string, { totalAssets: number; totalEquity: number; totalDebt: number; bvps: number }>();
 
-export async function fetchStockDataCached(
-  code: string,
-  market: 'A' | 'HK' | 'GLOBAL',
-  staticFallback?: { pe?: number; pb?: number; roe?: number; dy?: number; ps?: number; n?: string }
-): Promise<CompleteStockData> {
-  const key = `${market}:${code}`;
-  const cached = stockCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  try {
+    const cbName = `fin_bs_${code}_${Date.now()}`;
+    const filter = `(SECURITY_CODE="${code}")`;
+    const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,PARENT_EQUITY,BPS';
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
+    const data = await jsonp(url, cbName);
+    const items = data?.result?.data || [];
 
-  const data = await fetchCompleteStockData(code, market, staticFallback);
-  stockCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
-  return data;
+    for (const item of items) {
+      const year = (item.REPORT_DATE || '').substring(0, 4);
+      if (!year) continue;
+
+      result.set(year, {
+        totalAssets: (item.TOTAL_ASSETS || 0) / 1e8,
+        totalEquity: (item.PARENT_EQUITY || item.TOTAL_EQUITY || 0) / 1e8,
+        totalDebt: (item.TOTAL_LIABILITIES || 0) / 1e8,
+        bvps: item.BPS || 0,
+      });
+    }
+  } catch (e) {
+    console.warn(`[fetchBalanceSheetData] Failed for ${code}:`, e);
+  }
+
+  return result;
 }
 
-export function clearStockCache() {
-  stockCache.clear();
+// ─── 东方财富：每股指标 ───
+
+async function fetchPerShareData(code: string): Promise<Map<string, { eps: number; bvps: number; roe: number }>> {
+  const result = new Map<string, { eps: number; bvps: number; roe: number }>();
+
+  try {
+    const cbName = `fin_ps_${code}_${Date.now()}`;
+    const filter = `(SECURITY_CODE="${code}")`;
+    const columns = 'SECURITY_CODE,REPORT_DATE,BASIC_EPS,BPS,WEIGHTAVG_ROE';
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
+    const data = await jsonp(url, cbName);
+    const items = data?.result?.data || [];
+
+    for (const item of items) {
+      const year = (item.REPORT_DATE || '').substring(0, 4);
+      if (!year) continue;
+
+      result.set(year, {
+        eps: item.BASIC_EPS || 0,
+        bvps: item.BPS || 0,
+        roe: item.WEIGHTAVG_ROE || 0,
+      });
+    }
+  } catch (e) {
+    console.warn(`[fetchPerShareData] Failed for ${code}:`, e);
+  }
+
+  return result;
+}
+
+// ─── 整合三表数据 → FinancialStatement[] ───
+
+export async function fetchFinancialStatements(code: string): Promise<FinancialStatement[]> {
+  // 并行获取三表 + 每股指标
+  const [mainData, cfData, bsData, psData] = await Promise.all([
+    fetchMainFinanceData(code),
+    fetchCashFlowData(code),
+    fetchBalanceSheetData(code),
+    fetchPerShareData(code),
+  ]);
+
+  if (mainData.length === 0) return [];
+
+  // 按年份合并
+  const statements: FinancialStatement[] = [];
+
+  for (const item of mainData) {
+    const year = (item.REPORT_DATE || '').substring(0, 4);
+    if (!year) continue;
+
+    const cf = cfData.get(year) || { operatingCF: 0, investingCF: 0, financingCF: 0, capex: 0, dividendPaid: 0 };
+    const bs = bsData.get(year) || { totalAssets: 0, totalEquity: 0, totalDebt: 0, bvps: 0 };
+    const ps = psData.get(year) || { eps: 0, bvps: 0, roe: 0 };
+
+    const revenue = (item.OPERATE_INCOME || item.TOTAL_OPERATE_INCOME || 0) / 1e8;
+    const netIncome = (item.PARENT_NETPROFIT || item.NETPROFIT || 0) / 1e8;
+    const costOfRevenue = (item.OPERATE_COST || 0) / 1e8;
+    const grossProfit = revenue - costOfRevenue;
+    const operatingProfit = (item.NETPROFIT || 0) / 1e8; // 简化
+
+    // 优先用年报数据（12-31），如果没有则用最新报告期
+    const reportDate = item.REPORT_DATE || '';
+
+    statements.push({
+      year,
+      reportDate,
+      revenue,
+      costOfRevenue,
+      grossProfit,
+      operatingProfit,
+      netIncome,
+      eps: ps.eps || item.BASIC_EPS || 0,
+      totalAssets: bs.totalAssets,
+      totalEquity: bs.totalEquity,
+      totalDebt: bs.totalDebt,
+      bvps: bs.bvps || ps.bvps || 0,
+      operatingCF: cf.operatingCF,
+      investingCF: cf.investingCF,
+      financingCF: cf.financingCF,
+      capex: cf.capex,
+      freeCF: cf.operatingCF - cf.capex,
+      dividendPaid: cf.dividendPaid,
+      roe: ps.roe || item.WEIGHTAVG_ROE || 0,
+      roa: bs.totalAssets > 0 ? (netIncome / bs.totalAssets) * 100 : 0,
+      grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
+      netMargin: revenue > 0 ? (netIncome / revenue) * 100 : 0,
+      debtRatio: bs.totalAssets > 0 ? (bs.totalDebt / bs.totalAssets) * 100 : 0,
+      revenueGrowth: item.YSTZ || 0,
+      netIncomeGrowth: item.SJLTZ || 0,
+      payoutRatio: netIncome > 0 ? (cf.dividendPaid / netIncome) * 100 : 0,
+    });
+  }
+
+  return statements;
+}
+
+// ─── localStorage 缓存 ───
+
+const CACHE_PREFIX = 'iv_fin_';
+const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 天
+
+function getCacheKey(code: string): string {
+  return `${CACHE_PREFIX}${code}`;
+}
+
+function loadFromCache(code: string): FinancialStatement[] | null {
+  try {
+    const raw = localStorage.getItem(getCacheKey(code));
+    if (!raw) return null;
+    const cached: CachedValuationData = JSON.parse(raw);
+    if (Date.now() - cached.fetchedAt > cached.ttl) return null; // 过期
+    return cached.statements;
+  } catch {
+    return null;
+  }
+}
+
+function saveToCache(code: string, statements: FinancialStatement[]): void {
+  try {
+    const data: CachedValuationData = {
+      code,
+      statements,
+      fetchedAt: Date.now(),
+      ttl: DEFAULT_TTL,
+    };
+    localStorage.setItem(getCacheKey(code), JSON.stringify(data));
+  } catch (e) {
+    console.warn('[saveToCache] Failed:', e);
+  }
+}
+
+/** 带缓存的获取财务报表 */
+export async function fetchFinancialStatementsCached(code: string): Promise<FinancialStatement[]> {
+  // 1. 先查缓存
+  const cached = loadFromCache(code);
+  if (cached && cached.length > 0) {
+    // 后台静默刷新（超过 1 天）
+    const raw = localStorage.getItem(getCacheKey(code));
+    if (raw) {
+      try {
+        const c: CachedValuationData = JSON.parse(raw);
+        if (Date.now() - c.fetchedAt > 24 * 60 * 60 * 1000) {
+          // 后台刷新
+          fetchFinancialStatements(code).then(stmts => {
+            if (stmts.length > 0) saveToCache(code, stmts);
+          }).catch(() => {});
+        }
+      } catch {}
+    }
+    return cached;
+  }
+
+  // 2. 缓存没有，实时获取
+  const statements = await fetchFinancialStatements(code);
+  if (statements.length > 0) {
+    saveToCache(code, statements);
+  }
+  return statements;
+}
+
+/** 清除某只股票的缓存 */
+export function clearFinancialCache(code?: string): void {
+  if (code) {
+    localStorage.removeItem(getCacheKey(code));
+  } else {
+    // 清除所有财务缓存
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(CACHE_PREFIX)) keys.push(key);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+  }
 }
