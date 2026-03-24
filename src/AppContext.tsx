@@ -1,17 +1,13 @@
 import React, { createContext, useContext } from 'react';
-import { Industry, Company, AIConfig, ViewType, NavigationState, Index, ValuationConfig, PresetName } from './types';
+import { Industry, AIConfig, ViewType, NavigationState, Index, ValuationConfig, PresetName } from './types';
 import { ValuationResult, FinancialStatement } from './valuation/types';
 import { ChatConversation } from './types/chat';
+import { MarketData, IndexValuationData, LivePriceData } from './types/market';
 
 export interface ConfirmDialog {
   title: string;
   message: string;
   onConfirm: () => void;
-}
-
-export interface LivePrice {
-  p: string; ch: string; cp: string; up: boolean;
-  pe?: string; pb?: string; dy?: string; ps?: string; mcap?: string; fcap?: string;
 }
 
 export interface AppContextType {
@@ -34,15 +30,15 @@ export interface AppContextType {
   valuationConfig: ValuationConfig;
   activePreset: PresetName | null;
   settingsTab: 'ai' | 'data' | 'valuation';
-  livePrice: LivePrice | null;
+  livePrice: LivePriceData | null;
   customCompanies: any[];
   deletedCompanies: string[];
   isAddingCompany: boolean;
   aiAddError: string | null;
   isAddingIndex: boolean;
   aiIndexError: string | null;
-  batchData: Record<string, any>;
-  indexVal: Record<string, { pe?: number; pb?: number; dy?: number; pePct?: number; pbPct?: number; roe?: number; peg?: number; evaType?: string; bondYield?: number; source?: string; peOverHistory?: number; pbOverHistory?: number; evaTypeInt?: number; date?: string; p?: string; cp?: string }>;
+  batchData: Record<string, MarketData>;
+  indexVal: Record<string, IndexValuationData>;
   stockStatements: Record<string, FinancialStatement[]>;
   stockDetailLoading: Record<string, boolean>;
   valuationResults: Record<string, ValuationResult>;
