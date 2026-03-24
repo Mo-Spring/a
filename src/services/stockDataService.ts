@@ -156,6 +156,18 @@ async function fetchPerShareData(code: string): Promise<Map<string, { eps: numbe
 
 // ─── 整合三表数据 → FinancialStatement[] ───
 
+/** 判断是否为年报 */
+function isAnnualReport(reportDate: string): boolean {
+  return reportDate.endsWith('12-31') || reportDate.endsWith('12-30');
+}
+
+/** 数据 sanity check：防止异常值污染估值 */
+function sanitize(val: number, min: number, max: number, fallback = 0): number {
+  if (!isFinite(val) || isNaN(val)) return fallback;
+  if (val < min || val > max) return fallback;
+  return val;
+}
+
 export async function fetchFinancialStatements(code: string): Promise<FinancialStatement[]> {
   // 并行获取三表 + 每股指标
   const [mainData, cfData, bsData, psData] = await Promise.all([
@@ -167,53 +179,88 @@ export async function fetchFinancialStatements(code: string): Promise<FinancialS
 
   if (mainData.length === 0) return [];
 
+  // 优先保留年报，只取年报数据（避免季报数据与年报口径不同导致合并错误）
+  const annualMainData = mainData.filter(item => isAnnualReport(item.REPORT_DATE || ''));
+  // 如果年报不足 2 条，回退到全部数据（但仍需去重同一年只取最新）
+  const effectiveMainData = annualMainData.length >= 2 ? annualMainData : mainData;
+
+  // 按年份去重：同一年只保留最新的报告期
+  const seenYears = new Set<string>();
+  const dedupedMainData: any[] = [];
+  for (const item of effectiveMainData) {
+    const year = (item.REPORT_DATE || '').substring(0, 4);
+    if (!year || seenYears.has(year)) continue;
+    seenYears.add(year);
+    dedupedMainData.push(item);
+  }
+
   // 按年份合并
   const statements: FinancialStatement[] = [];
 
-  for (const item of mainData) {
+  for (const item of dedupedMainData) {
     const year = (item.REPORT_DATE || '').substring(0, 4);
     if (!year) continue;
 
-    const cf = cfData.get(year) || { operatingCF: 0, investingCF: 0, financingCF: 0, capex: 0, dividendPaid: 0 };
-    const bs = bsData.get(year) || { totalAssets: 0, totalEquity: 0, totalDebt: 0, bvps: 0 };
-    const ps = psData.get(year) || { eps: 0, bvps: 0, roe: 0 };
+    const isAnnual = isAnnualReport(item.REPORT_DATE || '');
+
+    // 只用年报数据做三表匹配（季报的三表口径不同）
+    let cf = { operatingCF: 0, investingCF: 0, financingCF: 0, capex: 0, dividendPaid: 0 };
+    let bs = { totalAssets: 0, totalEquity: 0, totalDebt: 0, bvps: 0 };
+    let ps = { eps: 0, bvps: 0, roe: 0 };
+
+    // 优先匹配同年年报的三表数据
+    for (const [key, val] of cfData) {
+      if (key === year) { cf = val; break; }
+    }
+    for (const [key, val] of bsData) {
+      if (key === year) { bs = val; break; }
+    }
+    for (const [key, val] of psData) {
+      if (key === year) { ps = val; break; }
+    }
 
     const revenue = (item.OPERATE_INCOME || item.TOTAL_OPERATE_INCOME || 0) / 1e8;
     const netIncome = (item.PARENT_NETPROFIT || item.NETPROFIT || 0) / 1e8;
     const costOfRevenue = (item.OPERATE_COST || 0) / 1e8;
     const grossProfit = revenue - costOfRevenue;
-    const operatingProfit = (item.NETPROFIT || 0) / 1e8; // 简化
+    const operatingProfit = (item.NETPROFIT || 0) / 1e8;
 
-    // 优先用年报数据（12-31），如果没有则用最新报告期
     const reportDate = item.REPORT_DATE || '';
+
+    // Sanity checks
+    const safeTotalAssets = sanitize(bs.totalAssets, 0, 1e8, 0);
+    const safeTotalDebt = sanitize(bs.totalDebt, 0, 1e8, 0);
+    const safeRevenue = sanitize(revenue, 0, 1e6, 0);
+    const safeNetIncome = sanitize(netIncome, -1e5, 1e5, 0);
+    const safeDebtRatio = safeTotalAssets > 0 ? sanitize((safeTotalDebt / safeTotalAssets) * 100, 0, 100, 0) : 0;
 
     statements.push({
       year,
       reportDate,
-      revenue,
-      costOfRevenue,
-      grossProfit,
-      operatingProfit,
-      netIncome,
-      eps: ps.eps || item.BASIC_EPS || 0,
-      totalAssets: bs.totalAssets,
-      totalEquity: bs.totalEquity,
-      totalDebt: bs.totalDebt,
-      bvps: bs.bvps || ps.bvps || 0,
-      operatingCF: cf.operatingCF,
-      investingCF: cf.investingCF,
-      financingCF: cf.financingCF,
-      capex: cf.capex,
-      freeCF: cf.operatingCF - cf.capex,
-      dividendPaid: cf.dividendPaid,
-      roe: ps.roe || item.WEIGHTAVG_ROE || 0,
-      roa: bs.totalAssets > 0 ? (netIncome / bs.totalAssets) * 100 : 0,
-      grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
-      netMargin: revenue > 0 ? (netIncome / revenue) * 100 : 0,
-      debtRatio: bs.totalAssets > 0 ? (bs.totalDebt / bs.totalAssets) * 100 : 0,
-      revenueGrowth: item.YSTZ || 0,
-      netIncomeGrowth: item.SJLTZ || 0,
-      payoutRatio: netIncome > 0 ? (cf.dividendPaid / netIncome) * 100 : 0,
+      revenue: safeRevenue,
+      costOfRevenue: sanitize(costOfRevenue, 0, 1e6, 0),
+      grossProfit: sanitize(grossProfit, -1e6, 1e6, 0),
+      operatingProfit: sanitize(operatingProfit, -1e6, 1e6, 0),
+      netIncome: safeNetIncome,
+      eps: sanitize(ps.eps || item.BASIC_EPS || 0, -1000, 1000, 0),
+      totalAssets: safeTotalAssets,
+      totalEquity: sanitize(bs.totalEquity, 0, 1e8, 0),
+      totalDebt: safeTotalDebt,
+      bvps: sanitize(bs.bvps || ps.bvps || 0, 0, 10000, 0),
+      operatingCF: sanitize(cf.operatingCF, -1e6, 1e6, 0),
+      investingCF: sanitize(cf.investingCF, -1e6, 1e6, 0),
+      financingCF: sanitize(cf.financingCF, -1e6, 1e6, 0),
+      capex: sanitize(cf.capex, 0, 1e6, 0),
+      freeCF: sanitize(cf.operatingCF - cf.capex, -1e6, 1e6, 0),
+      dividendPaid: sanitize(cf.dividendPaid, 0, 1e6, 0),
+      roe: sanitize(ps.roe || item.WEIGHTAVG_ROE || 0, -50, 100, 0),
+      roa: safeTotalAssets > 0 ? sanitize((safeNetIncome / safeTotalAssets) * 100, -50, 50, 0) : 0,
+      grossMargin: safeRevenue > 0 ? sanitize((grossProfit / safeRevenue) * 100, -100, 100, 0) : 0,
+      netMargin: safeRevenue > 0 ? sanitize((safeNetIncome / safeRevenue) * 100, -100, 100, 0) : 0,
+      debtRatio: safeDebtRatio,
+      revenueGrowth: sanitize(item.YSTZ || 0, -100, 1000, 0),
+      netIncomeGrowth: sanitize(item.SJLTZ || 0, -100, 1000, 0),
+      payoutRatio: safeNetIncome > 0 ? sanitize((cf.dividendPaid / safeNetIncome) * 100, 0, 100, 0) : 0,
     });
   }
 
