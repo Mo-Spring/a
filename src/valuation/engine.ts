@@ -1,14 +1,14 @@
 /**
- * 估值引擎 v2
+ * 估值引擎 v3
  *
  * 两个核心模型：
- *   ① DCF 现金流折现（含敏感性分析）
- *   ② PE 相对估值（行业 + 历史 + PEG 加权，含历史 PE 百分位）
+ *   ① DCF 现金流折现（输出每股绝对价值 ¥）
+ *   ② PE 相对估值（输出合理 PE × EPS = 每股价值 ¥）
  *
- * 辅助信号（不参与估值计算，只提供判断依据）：
- *   • 护城河评分（ROE 稳定性、毛利率、FCF 质量）
- *   • 清算底线（0.7 × BVPS）
- *   • 市场预期反推（当前价隐含的增长率）
+ * 两个模型输出统一为「每股价值 ¥」，可安全加权。
+ * 增长率在两个模型间共享估算结果，避免双重计入。
+ *
+ * 辅助信号：护城河、清算底线、市场预期反推
  */
 
 import type {
@@ -45,7 +45,6 @@ function std(arr: number[]): number {
 function estimateBeta(d: StockInput): number {
   let b = 1.0;
 
-  // 利润波动（用真实报表数据）
   const stmts = d.statements;
   if (stmts.length >= 3) {
     const incomes = stmts.map(s => s.netIncome).filter(v => v > 0);
@@ -54,22 +53,19 @@ function estimateBeta(d: StockInput): number {
       b += clamp((cv - 0.15) * 1.2, -0.25, 0.5);
     }
   } else {
-    b += 0.15; // 数据不足，稍加风险
+    b += 0.15;
   }
 
-  // 市值
   if (d.mcap > 0) {
     if (d.mcap < 50) b += 0.25;
     else if (d.mcap < 200) b += 0.15;
     else if (d.mcap > 3000) b -= 0.1;
   }
 
-  // 杠杆
   if (d.totalDebt > 70) b += 0.15;
   else if (d.totalDebt > 50) b += 0.08;
   else if (d.totalDebt < 20) b -= 0.05;
 
-  // PE 高 → 波动大
   if (d.pe > 50) b += 0.08;
   else if (d.pe > 0 && d.pe < 10) b -= 0.05;
 
@@ -77,41 +73,30 @@ function estimateBeta(d: StockInput): number {
 }
 
 // ═══════════════════════════════════════
-// 数据提取：从真实报表获取关键指标
+// 数据提取
 // ═══════════════════════════════════════
+
+function getShares(d: StockInput): number {
+  if (d.shares && d.shares > 0) return d.shares;
+  if (d.mcap > 0 && d.price > 0) return (d.mcap * 1e8) / d.price;
+  if (d.eps > 0 && d.netIncome > 0) return (d.netIncome * 1e8) / d.eps;
+  return 1e9;
+}
 
 /** 获取每股 FCF（优先真实数据） */
 function getFCFPerShare(d: StockInput): number {
   const shares = getShares(d);
   if (shares <= 0) return 0;
 
-  // 优先：最新年报的真实 FCF
   if (d.statements.length > 0) {
     const latest = d.statements[0];
     if (latest.freeCF > 0) return (latest.freeCF * 1e8) / shares;
   }
-
-  // Fallback 1：输入中的 freeCF
   if (d.freeCF > 0) return (d.freeCF * 1e8) / shares;
-
-  // Fallback 2：经营现金流 × 70%
   if (d.operatingCF > 0) return (d.operatingCF * 0.7 * 1e8) / shares;
-
-  // Fallback 3：净利润
   if (d.netIncome > 0) return (d.netIncome * 1e8) / shares;
-
-  // Fallback 4：EPS
   if (d.eps > 0) return d.eps;
-
   return 0;
-}
-
-function getShares(d: StockInput): number {
-  if (d.shares && d.shares > 0) return d.shares;
-  if (d.mcap > 0 && d.price > 0) return (d.mcap * 1e8) / d.price;
-  if (d.eps > 0 && d.pe > 0 && d.mcap > 0) return (d.mcap * 1e8) / (d.eps * d.pe);
-  if (d.eps > 0 && d.netIncome > 0) return (d.netIncome * 1e8) / d.eps;
-  return 1e9;
 }
 
 function getFCFBasis(d: StockInput): 'fcf' | 'netIncome' | 'eps' {
@@ -122,14 +107,22 @@ function getFCFBasis(d: StockInput): 'fcf' | 'netIncome' | 'eps' {
 }
 
 // ═══════════════════════════════════════
-// 增长率估计（基于真实历史数据）
+// 增长率估计（共享，避免双重计入）
 // ═══════════════════════════════════════
 
-function estimateGrowthRate(d: StockInput): number {
+/**
+ * 统一增长率估算，同时用于 DCF 和 PE 相对估值
+ * 返回 { baseGrowth, pegGrowth }
+ *
+ * baseGrowth: 用于 DCF 折现的中长期增长率
+ * pegGrowth: 用于 PEG 估值的短期盈利增长率（年化 %）
+ */
+function estimateGrowthRates(d: StockInput): { baseGrowth: number; pegGrowth: number } {
   const estimates: { value: number; weight: number }[] = [];
 
-  // 1. 历史净利润 CAGR（用真实报表）
   const stmts = d.statements;
+
+  // 1. 历史净利润 CAGR
   if (stmts.length >= 2) {
     const incomes = stmts.map(s => s.netIncome).filter(v => v > 0);
     if (incomes.length >= 2) {
@@ -163,16 +156,16 @@ function estimateGrowthRate(d: StockInput): number {
     if (g > -0.8 && g < 2) estimates.push({ value: g * 0.8, weight: 1.0 });
   }
 
-  // 3. ROE × 留存率（可持续增长率）
+  // 3. ROE × 留存率（可持续增长率上限）
   if (d.roe > 0 && d.roe < 50) {
     const roe = d.roe / 100;
     const payout = d.dy > 3 ? 0.4 : d.dy > 1 ? 0.6 : 0.8;
-    const sg = roe * payout;
+    const sg = roe * (1 - payout);
     if (sg > 0 && sg < 0.5) estimates.push({ value: sg, weight: 2.0 });
   }
 
   // 加权平均
-  let base = 0.05;
+  let base: number;
   if (estimates.length > 0) {
     const totalW = estimates.reduce((s, e) => s + e.weight, 0);
     base = estimates.reduce((s, e) => s + e.value * e.weight, 0) / totalW;
@@ -184,20 +177,36 @@ function estimateGrowthRate(d: StockInput): number {
     if (d.mcap > 2000) base *= 0.7;
   }
 
-  // ROE 约束：增长率不应超过 ROE × 留存率太多
+  // ROE 约束：增长率不应超过可持续增长率太多
   if (d.roe > 0 && d.roe < 50) {
-    const maxGrowth = (d.roe / 100) * 0.8;
+    const payout = d.dy > 3 ? 0.4 : d.dy > 1 ? 0.6 : 0.8;
+    const maxGrowth = (d.roe / 100) * (1 - payout) * 1.5;
     base = Math.min(base, maxGrowth);
   }
 
-  return clamp(base, 0.01, 0.35);
+  base = clamp(base, 0.01, 0.25);
+
+  // PEG 用的增长率 = baseGrowth 的保守版本（取较低值或最新一期）
+  let pegGrowth = base;
+  if (d.netIncomeGrowth > 0) {
+    const recent = d.netIncomeGrowth / 100;
+    pegGrowth = clamp(recent, 0.01, 0.40);
+    // 取 base 和 recent 的较低值，更保守
+    pegGrowth = Math.min(pegGrowth, base * 1.2);
+  }
+
+  return { baseGrowth: base, pegGrowth: clamp(pegGrowth, 0.01, 0.40) };
 }
 
 // ═══════════════════════════════════════
-// 模型 ①：DCF 现金流折现（含敏感性分析）
+// 模型 ①：DCF 现金流折现
 // ═══════════════════════════════════════
 
-function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
+function modelDCF(
+  d: StockInput,
+  p: ValuationParams['dcf'],
+  growth: number,
+): DCFResult {
   const fcfPS = getFCFPerShare(d);
   const basis = getFCFBasis(d);
   const empty: DCFResult = {
@@ -214,16 +223,15 @@ function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
   const wacc = clamp(rf + beta * erp, 0.04, 0.25);
   const tg = p.terminalGrowth;
   const years = p.projectionYears;
-  const baseGrowth = estimateGrowthRate(d);
 
   if (wacc <= tg) return empty;
 
-  // 三阶段增长
+  // 两阶段增长
   const s1Years = Math.min(5, Math.floor(years * 0.5));
   const s2Years = years - s1Years;
-  const s2Growth = (baseGrowth + tg) / 2;
+  const s2Growth = (growth + tg) / 2;
   const phases = [
-    { years: s1Years, growth: baseGrowth },
+    { years: s1Years, growth },
     { years: s2Years, growth: s2Growth },
   ];
 
@@ -233,7 +241,7 @@ function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
     let pvSum = 0, fcf = fcfPS;
 
     for (let y = 1; y <= years; y++) {
-      const g = y <= s1Years ? baseGrowth : s2Growth;
+      const g = y <= s1Years ? growth : s2Growth;
       fcf *= (1 + g);
       const pv = fcf / Math.pow(1 + w, y);
       pvSum += pv;
@@ -251,11 +259,13 @@ function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
   const base = calcScenario(p.discountRates.base);
   const bear = calcScenario(p.discountRates.bear);
 
-  // 敏感性分析：增长率 × 折现率
+  // 敏感性分析：增长率 × 折现率（按行分组，每行 3 个折现率）
+  const growthSteps = [growth * 0.5, growth * 0.75, growth, growth * 1.25, growth * 1.5];
+  const waccSteps = [p.discountRates.bull, p.discountRates.base, p.discountRates.bear];
   const sensitivity: Array<{ growth: number; wacc: number; value: number }> = [];
-  for (const g of [baseGrowth * 0.5, baseGrowth * 0.75, baseGrowth, baseGrowth * 1.25, baseGrowth * 1.5]) {
-    for (const w of [p.discountRates.bull, p.discountRates.base, p.discountRates.bear]) {
-      // 临时用指定增长率重算
+
+  for (const g of growthSteps) {
+    for (const w of waccSteps) {
       let pvSum = 0, fcf = fcfPS;
       for (let y = 1; y <= years; y++) {
         const gy = y <= s1Years ? g : (g + tg) / 2;
@@ -272,7 +282,6 @@ function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
   const eps = positiveOr(d.eps, 0.01);
   const confidence = (() => {
     let c = 0.3;
-    // 有真实 FCF 加分
     if (d.statements.length > 0 && d.statements[0].freeCF > 0) c += 0.25;
     else if (d.freeCF > 0) c += 0.15;
     if (d.statements.length >= 3) c += 0.2;
@@ -303,77 +312,77 @@ function modelDCF(d: StockInput, p: ValuationParams['dcf']): DCFResult {
 }
 
 // ═══════════════════════════════════════
-// 模型 ②：PE 相对估值（含历史 PE 百分位）
+// 模型 ②：PE 相对估值
 // ═══════════════════════════════════════
 
-function modelRelative(d: StockInput, ind: IndustryData, p: ValuationParams['pe']): RelativeResult {
+function modelRelative(
+  d: StockInput,
+  ind: IndustryData,
+  p: ValuationParams['pe'],
+  growth: number,
+  pegGrowth: number,
+): RelativeResult {
   const roe = d.roe > 0 ? d.roe / 100 : 0;
-  const growth = d.netIncomeGrowth > 0 ? d.netIncomeGrowth / 100 : 0;
   const indPE = positiveOr(ind.pe, 20);
 
-  // ① 行业 PE × ROE 修正
-  const roeAdj = roe > 0 ? clamp(0.3 + 1.7 * (roe / 0.30), 0.3, 2.5) : 0.5;
+  // ① 行业 PE × ROE 修正（降低修正系数上限）
+  // ROE 20% → 1.0x，ROE 30% → 1.5x，ROE 40% → 1.8x，上限 2.0x
+  const roeAdj = roe > 0 ? clamp(0.5 + 5.0 * (roe - 0.10), 0.3, 2.0) : 0.5;
   const industryFairPE = indPE * roeAdj;
 
-  // ② 历史 PE（用真实报表数据计算 ROE 历史均值）
+  // ② 历史 PE（用真实报表数据）
   let histFairPE = indPE;
   const stmts = d.statements;
   if (stmts.length >= 3) {
     const histROEs = stmts.slice(0, Math.min(5, stmts.length)).map(s => s.roe).filter(v => v > 0);
     if (histROEs.length >= 2) {
       const avgROE = avg(histROEs);
-      histFairPE = indPE * clamp(avgROE / 15, 0.3, 3.0);
+      histFairPE = indPE * clamp(0.5 + 5.0 * (avgROE / 100 - 0.10), 0.3, 2.0);
     }
   } else if (roe > 0) {
-    histFairPE = indPE * clamp(roe / 0.15, 0.3, 3.0);
+    histFairPE = indPE * clamp(0.5 + 5.0 * (roe - 0.10), 0.3, 2.0);
   }
-  histFairPE = clamp(histFairPE, 3, 150);
+  histFairPE = clamp(histFairPE, 3, 80);
 
-  // ③ PEG 修正
+  // ③ PEG 修正（用共享的 pegGrowth）
   let pegFairPE: number;
   let peg = 0;
-  if (growth > 0.02) {
-    peg = d.pe > 0 ? d.pe / (growth * 100) : 0;
-    pegFairPE = growth * 100; // PEG=1
+  if (pegGrowth > 0.02) {
+    pegFairPE = pegGrowth * 100; // PEG=1 → fairPE = growth%
+    peg = d.pe > 0 ? d.pe / (pegGrowth * 100) : 0;
   } else if (roe > 0) {
-    const payout = d.dy > 3 ? 0.4 : d.dy > 1 ? 0.6 : 0.8;
-    const sg = roe * payout;
-    pegFairPE = clamp(sg * 100, 3, 60);
+    pegFairPE = clamp(roe * 50, 3, 40);
     peg = d.pe > 0 && pegFairPE > 0 ? d.pe / pegFairPE : 0;
   } else {
     pegFairPE = indPE * 0.5;
   }
+  pegFairPE = clamp(pegFairPE, 3, 80);
 
   // 动态权重
   const hasHistory = stmts.length >= 3;
-  const hasGrowth = growth > 0.02;
+  const hasGrowth = pegGrowth > 0.02;
   let wInd = p.industryWeight, wHist = p.historicalWeight, wGrow = p.growthWeight;
-  if (!hasHistory) { wHist *= 0.5; wGrow += wHist * 0.5; }
-  if (!hasGrowth) wGrow *= 0.3;
+  if (!hasHistory) { wHist *= 0.5; wInd += wHist * 0.5; wHist *= 0.5; }
+  if (!hasGrowth) { wGrow *= 0.3; wInd += wGrow * 0.7; wGrow *= 0.3; }
   const totalW = wInd + wHist + wGrow;
   if (totalW > 0) { wInd /= totalW; wHist /= totalW; wGrow /= totalW; }
 
   const fairPE = industryFairPE * wInd + histFairPE * wHist + pegFairPE * wGrow;
+  const clampedFairPE = clamp(fairPE, 3, 80);
   const eps = positiveOr(d.eps, 0.01);
-  const fairPrice = fairPE * eps;
+  const fairPrice = clampedFairPE * eps;
 
-  // 历史 PE 百分位（简化：用当前 PE / 行业 PE 的比值在历史 ROE 修正后的分布中估算）
+  // 历史 PE 百分位（同行比较）
   let historicalPEStats: RelativeResult['historicalPEStats'] = undefined;
-  if (hasHistory) {
-    // 如果有同行业 peers，计算当前 PE 在同行中的百分位
-    if (ind.peers && ind.peers.length >= 3) {
-      const peerPEs = ind.peers.map(p => p.pe).filter(v => v > 0 && v < 500).sort((a, b) => a - b);
-      if (peerPEs.length >= 3 && d.pe > 0) {
-        const below = peerPEs.filter(p => p < d.pe).length;
-        const percentile = below / peerPEs.length;
-        historicalPEStats = {
-          min: peerPEs[0],
-          max: peerPEs[peerPEs.length - 1],
-          median: peerPEs[Math.floor(peerPEs.length / 2)],
-          current: d.pe,
-          percentile,
-        };
-      }
+  if (ind.peers && ind.peers.length >= 3) {
+    const peerPEs = ind.peers.map(p => p.pe).filter(v => v > 0 && v < 500).sort((a, b) => a - b);
+    if (peerPEs.length >= 3 && d.pe > 0) {
+      const below = peerPEs.filter(p => p < d.pe).length;
+      historicalPEStats = {
+        min: peerPEs[0], max: peerPEs[peerPEs.length - 1],
+        median: peerPEs[Math.floor(peerPEs.length / 2)],
+        current: d.pe, percentile: below / peerPEs.length,
+      };
     }
   }
 
@@ -387,11 +396,10 @@ function modelRelative(d: StockInput, ind: IndustryData, p: ValuationParams['pe'
   })();
 
   return {
-    fairPE: { low: fairPE * 0.8, mid: fairPE, high: fairPE * 1.2 },
+    fairPE: { low: clampedFairPE * 0.8, mid: clampedFairPE, high: clampedFairPE * 1.2 },
     fairPrice: { low: fairPrice * 0.8, mid: fairPrice, high: fairPrice * 1.2 },
     industryFairPE, historicalFairPE: histFairPE, pegFairPE,
-    peg, confidence,
-    historicalPEStats,
+    peg, confidence, historicalPEStats,
   };
 }
 
@@ -403,12 +411,12 @@ function computeMoatSignals(d: StockInput): MoatSignal[] {
   const signals: MoatSignal[] = [];
   const stmts = d.statements;
 
-  // ① 盈利护城河：ROE 连续 3 年 > 15% + 毛利率稳定
+  // ① 盈利护城河
   if (stmts.length >= 3) {
     const recentROEs = stmts.slice(0, 3).map(s => s.roe);
     const allAbove15 = recentROEs.every(r => r > 15);
     const roeStd = std(recentROEs);
-    const stable = roeStd < 5; // 标准差 < 5%
+    const stable = roeStd < 5;
     const avgROE = avg(recentROEs);
 
     let score = 0;
@@ -416,58 +424,47 @@ function computeMoatSignals(d: StockInput): MoatSignal[] {
     else if (avgROE > 20) score += 30;
     else if (avgROE > 15) score += 20;
     else score += Math.max(0, avgROE * 0.8);
-
     if (stable) score += 30;
     if (allAbove15) score += 30;
 
     const grossMargins = stmts.slice(0, 3).map(s => s.grossMargin).filter(v => v > 0);
-    if (grossMargins.length >= 2) {
-      const gmStd = std(grossMargins);
-      if (gmStd < 3) score = Math.min(100, score + 10);
-    }
+    if (grossMargins.length >= 2 && std(grossMargins) < 3) score = Math.min(100, score + 10);
 
     signals.push({
-      label: '盈利护城河',
-      score: Math.round(score),
+      label: '盈利护城河', score: Math.round(score),
       level: score >= 70 ? 'strong' : score >= 50 ? 'good' : score >= 30 ? 'average' : 'weak',
       detail: `近3年 ROE ${recentROEs.map(r => r.toFixed(1) + '%').join(' / ')}，${stable ? '波动小' : '波动大'}`,
     });
   }
 
-  // ② 现金流质量：经营CF > 净利润 的比例
+  // ② 现金流质量
   if (stmts.length >= 2) {
     const ratios = stmts.slice(0, Math.min(5, stmts.length))
-      .filter(s => s.netIncome > 0)
-      .map(s => s.operatingCF / s.netIncome);
-
+      .filter(s => s.netIncome > 0).map(s => s.operatingCF / s.netIncome);
     if (ratios.length >= 2) {
       const avgRatio = avg(ratios);
       const score = Math.round(clamp(avgRatio * 60, 0, 100));
       signals.push({
-        label: '现金流质量',
-        score,
+        label: '现金流质量', score,
         level: score >= 70 ? 'strong' : score >= 50 ? 'good' : score >= 30 ? 'average' : 'weak',
         detail: `经营现金流/净利润 均值 ${avgRatio.toFixed(2)}，${avgRatio > 1 ? '利润含金量高' : '利润含金量一般'}`,
       });
     }
   }
 
-  // ③ 增长质量：营收 + 利润双增长
+  // ③ 增长质量
   if (stmts.length >= 2) {
     const recent = stmts.slice(0, Math.min(3, stmts.length));
     const revGrowthAll = recent.every(s => s.revenueGrowth > 0);
     const niGrowthAll = recent.every(s => s.netIncomeGrowth > 0);
     const avgRevGrowth = avg(recent.map(s => s.revenueGrowth));
     const avgNIGrowth = avg(recent.map(s => s.netIncomeGrowth));
-
     let score = 50;
     if (revGrowthAll) score += 20;
     if (niGrowthAll) score += 20;
-    if (avgNIGrowth > avgRevGrowth) score += 10; // 利润增速 > 营收增速 = 提效
-
+    if (avgNIGrowth > avgRevGrowth) score += 10;
     signals.push({
-      label: '增长质量',
-      score: Math.round(clamp(score, 0, 100)),
+      label: '增长质量', score: Math.round(clamp(score, 0, 100)),
       level: score >= 70 ? 'strong' : score >= 50 ? 'good' : score >= 30 ? 'average' : 'weak',
       detail: `近${recent.length}年 营收增长 ${avgRevGrowth.toFixed(1)}% / 净利润增长 ${avgNIGrowth.toFixed(1)}%`,
     });
@@ -477,8 +474,7 @@ function computeMoatSignals(d: StockInput): MoatSignal[] {
   if (d.totalDebt > 0) {
     const score = Math.round(clamp(100 - d.totalDebt * 1.2, 0, 100));
     signals.push({
-      label: '负债安全',
-      score,
+      label: '负债安全', score,
       level: d.totalDebt < 30 ? 'strong' : d.totalDebt < 50 ? 'good' : d.totalDebt < 70 ? 'average' : 'weak',
       detail: `资产负债率 ${d.totalDebt.toFixed(1)}%`,
     });
@@ -487,7 +483,6 @@ function computeMoatSignals(d: StockInput): MoatSignal[] {
   return signals;
 }
 
-/** 清算底线 */
 function computeLiquidationPrice(d: StockInput): number {
   if (d.bvps > 0) return d.bvps * 0.7;
   if (d.statements.length > 0 && d.statements[0].bvps > 0) return d.statements[0].bvps * 0.7;
@@ -498,13 +493,9 @@ function computeLiquidationPrice(d: StockInput): number {
 function computeImpliedGrowth(d: StockInput, p: ValuationParams['dcf']): number | null {
   if (d.price <= 0) return null;
 
-  const rf = p.rf;
-  const erp = p.erp;
-  const beta = estimateBeta(d);
+  const rf = p.rf, erp = p.erp, beta = estimateBeta(d);
   const wacc = clamp(rf + beta * erp, 0.04, 0.25);
-  const tg = p.terminalGrowth;
-  const years = p.projectionYears;
-
+  const tg = p.terminalGrowth, years = p.projectionYears;
   if (wacc <= tg) return null;
 
   const fcfPS = getFCFPerShare(d);
@@ -528,38 +519,22 @@ function computeImpliedGrowth(d: StockInput, p: ValuationParams['dcf']): number 
   return Math.abs(result) < 0.6 ? result : null;
 }
 
-/** 风险信号 */
 function generateRiskSignals(d: StockInput, dcf: DCFResult): RiskSignal[] {
   const signals: RiskSignal[] = [];
-
   if (d.totalDebt > 70) signals.push({ level: 'danger', message: `资产负债率 ${d.totalDebt.toFixed(1)}% 过高` });
   else if (d.totalDebt > 50) signals.push({ level: 'warning', message: `资产负债率 ${d.totalDebt.toFixed(1)}% 偏高` });
-
   if (d.pe > 80) signals.push({ level: 'warning', message: `PE ${d.pe.toFixed(1)} 显著偏高` });
   if (d.pe <= 0) signals.push({ level: 'danger', message: '公司当前亏损' });
-
   if (d.netIncomeGrowth < -30) signals.push({ level: 'danger', message: `净利润同比 ${d.netIncomeGrowth.toFixed(1)}%，大幅下滑` });
-
   if (dcf.terminalValueRatio > 0.75) signals.push({ level: 'info', message: `终值占比 ${(dcf.terminalValueRatio * 100).toFixed(0)}%，估值高度依赖远期假设` });
-
   if (d.freeCF <= 0 && d.netIncome > 0) {
-    const stmts = d.statements;
-    const hasRealFCF = stmts.length > 0 && stmts.some(s => s.freeCF > 0);
-    if (!hasRealFCF) {
-      signals.push({ level: 'info', message: '自由现金流数据缺失，DCF 基于净利润估算' });
-    }
+    const hasRealFCF = d.statements.length > 0 && d.statements.some(s => s.freeCF > 0);
+    if (!hasRealFCF) signals.push({ level: 'info', message: '自由现金流数据缺失，DCF 基于净利润估算' });
   }
-
   if (d.dy > 6) signals.push({ level: 'info', message: `股息率 ${d.dy.toFixed(1)}%，需确认是否可持续` });
-
-  // 连续利润下滑
-  const stmts = d.statements;
-  if (stmts.length >= 3) {
-    const recent = stmts.slice(0, 3);
-    const allDeclining = recent.every(s => s.netIncomeGrowth < 0);
-    if (allDeclining) signals.push({ level: 'danger', message: '连续3期净利润同比下滑' });
+  if (d.statements.length >= 3 && d.statements.slice(0, 3).every(s => s.netIncomeGrowth < 0)) {
+    signals.push({ level: 'danger', message: '连续3期净利润同比下滑' });
   }
-
   return signals;
 }
 
@@ -572,21 +547,23 @@ export function calculateValuation(
   industry: IndustryData,
   params: ValuationParams,
 ): ValuationResult {
-  const dcf = modelDCF(data, params.dcf);
-  const relative = modelRelative(data, industry, params.pe);
+  // 统一增长率估算，两个模型共享
+  const { baseGrowth, pegGrowth } = estimateGrowthRates(data);
+
+  const dcf = modelDCF(data, params.dcf, baseGrowth);
+  const relative = modelRelative(data, industry, params.pe, baseGrowth, pegGrowth);
 
   // 动态权重
-  const growth = estimateGrowthRate(data);
   let wDCF = 0.50, wRel = 0.50;
   if (data.statements.length > 0 && data.statements[0].freeCF > 0) wDCF += 0.10;
-  if (growth > 0.15) wDCF += 0.10;
-  if (growth < 0.05 && data.pe > 0 && data.pe < 30) wRel += 0.10;
+  if (baseGrowth > 0.15) wDCF += 0.05;
+  if (baseGrowth < 0.05 && data.pe > 0 && data.pe < 30) wRel += 0.10;
   if (data.statements.length >= 3) wRel += 0.05;
   const wTotal = wDCF + wRel;
   wDCF /= wTotal;
   wRel /= wTotal;
 
-  // 综合估值
+  // 综合估值（两个模型输出都是每股价值 ¥，可安全加权）
   const compositeMid = dcf.fairValue.mid * wDCF + relative.fairPrice.mid * wRel;
   const compositeLow = dcf.fairValue.low * wDCF + relative.fairPrice.low * wRel;
   const compositeHigh = dcf.fairValue.high * wDCF + relative.fairPrice.high * wRel;
@@ -606,17 +583,12 @@ export function calculateValuation(
   else if (marginMid > -30) { verdict = 'overvalued'; verdictText = '高估'; }
   else { verdict = 'deeply_overvalued'; verdictText = '严重高估'; }
 
-  // 辅助信号
   const moatSignals = computeMoatSignals(data);
   const riskSignals = generateRiskSignals(data, dcf);
   const liquidationPrice = computeLiquidationPrice(data);
   const impliedGrowth = computeImpliedGrowth(data, params.dcf);
 
-  // 综合置信度
-  const confidence = clamp(
-    dcf.confidence * 0.55 + relative.confidence * 0.45,
-    0, 1,
-  );
+  const confidence = clamp(dcf.confidence * 0.55 + relative.confidence * 0.45, 0, 1);
 
   return {
     dcf, relative,
