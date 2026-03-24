@@ -52,13 +52,13 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
   const valResult = valuationResults[tCode];
   const stmts = stockStatements[tCode] || [];
 
+  const currentPrice = (livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0');
   const currentPE = (livePrice?.pe && !isNaN(parseFloat(livePrice.pe)) && parseFloat(livePrice.pe) > 0 ? parseFloat(livePrice.pe) : (batchData[tCode]?.pe || 0));
   const currentPB = (livePrice?.pb && !isNaN(parseFloat(livePrice.pb)) && parseFloat(livePrice.pb) > 0 ? parseFloat(livePrice.pb) : (batchData[tCode]?.pb || 0));
   const currentDY = (livePrice?.dy && !isNaN(parseFloat(livePrice.dy)) ? parseFloat(livePrice.dy) : (batchData[tCode]?.dy || 0));
   const currentROE = batchData[tCode]?.roe || (stmts.length > 0 ? stmts[0].roe : 0);
   const currentEPS = batchData[tCode]?.eps || (currentPE > 0 && currentPrice > 0 ? currentPrice / currentPE : 0);
   const currentBVPS = stmts.length > 0 ? stmts[0].bvps : (currentPB > 0 && currentEPS > 0 ? currentEPS * currentPB : 0);
-  const currentPrice = (livePrice && livePrice.p !== '—') ? parseFloat(livePrice.p) : parseFloat(batchData[tCode]?.p || '0');
 
   let dcfFair = { low: 0, mid: 0, high: 0 };
   let dcfImpliedPE = { low: 0, mid: 0, high: 0 };
