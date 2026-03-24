@@ -22,6 +22,9 @@ const IndexDetailView = ({ idx, batchData, indexVal, breadcrumbNodes }: IndexDet
     dy: djIv.dy,
     pePct: djIv.pePct,
     pbPct: djIv.pbPct,
+    roe: djIv.roe,
+    peg: djIv.peg,
+    bondYield: djIv.bondYield,
     source: djIv.source,
   } : undefined;
 
