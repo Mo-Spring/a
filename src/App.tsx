@@ -24,6 +24,7 @@ import { useIndexValuation } from './hooks/useIndexValuation';
 import { useLivePrice } from './hooks/useLivePrice';
 import { useFinancialStatements } from './hooks/useFinancialStatements';
 import { useValuation } from './hooks/useValuation';
+import { useStockPercentiles } from './hooks/useStockPercentiles';  // ← 新增
 
 // ─── View Components ───
 import HomeView from './views/HomeView';
@@ -209,6 +210,9 @@ export default function App() {
   // Live price — only when viewing a company detail
   const currentCompCode = view === 'comp' ? navArgs[0] : undefined;
   useLivePrice(currentCompCode, allIndustries, setLivePrice);
+
+  // Stock percentiles — fetch historical PE/PB and compute percentile  // ← 新增
+  useStockPercentiles(currentCompCode, setBatchData);                   // ← 新增
 
   // Financial statements — only when viewing a company detail
   useFinancialStatements(currentCompCode, setStockStatements, setStockDetailLoading);
