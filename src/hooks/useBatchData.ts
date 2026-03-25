@@ -3,14 +3,14 @@
  *
  * 职责：
  * - 定期拉取所有行业成分股 + 板块指数 + 用户指数的实时行情
- * - 定期拉取行业关联指数的行情（idx_ 前缀存储）
+ * - 定期拉取行业关联指数的行情（plain key 存储，和 fetchBatch 统一）
  *
  * 刷新间隔：10s（实时行情需要及时更新）
  *
  * 数据源：东方财富 push2 JSONP API
  */
 
-import { useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';import { Industry, Index } from '../types';
+import { useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';import { Industry, Index } from '../types';
 import { MarketData } from '../types/market';
 import { jsonp, cleanupAllJsonp } from '../utils/jsonp';
 
@@ -88,7 +88,6 @@ function buildSecids(
 }
 
 const BATCH_FIELDS = 'f2,f3,f9,f12,f13,f14,f20,f23,f37,f57,f112,f113,f116,f117,f133,f137,f138';
-const IND_IDX_FIELDS = 'f2,f3,f9,f12,f13,f20,f23,f133';
 const CHUNK_SIZE = 100;
 
 export function useBatchData(
@@ -97,6 +96,12 @@ export function useBatchData(
   allCodesStr: string,
   setBatchData: Dispatch<SetStateAction<Record<string, MarketData>>>,
 ) {
+  // 从 allIndustries 推导稳定依赖字符串（用于 fetchIndustryIndices 的依赖）
+  const allIndustriesStr = useMemo(
+    () => JSON.stringify(allIndustries.flatMap(ind => (ind.indices || []).map(idx => idx.c))),
+    [allIndustries],
+  );
+
   // 主批量行情
   const fetchBatch = useCallback(async () => {
     const secidsList = buildSecids(allIndustries, indices);
@@ -133,7 +138,7 @@ export function useBatchData(
     }
   }, [allCodesStr, setBatchData]);
 
-  // 行业关联指数行情
+  // 行业关联指数行情（用完整字段，存 plain key，和 fetchBatch 统一）
   const fetchIndustryIndices = useCallback(async () => {
     const allIndustryIndices = [...new Map(
       allIndustries.flatMap(ind => ind.indices || []).map(idx => [idx.c, idx])
@@ -150,8 +155,8 @@ export function useBatchData(
 
     try {
       const d = await jsonp(
-        `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=${IND_IDX_FIELDS}&cb=jsonp_indidx`,
-        { key: 'indidx', timeout: 10000 },
+        `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=${BATCH_FIELDS}&cb=jsonp_indidx`,
+        { key: `indidx_${allIndustriesStr}`, timeout: 10000 },
       );
       if (d?.data?.diff) {
         setBatchData(prev => {
@@ -162,11 +167,16 @@ export function useBatchData(
             const pScale = mkId === 116 ? 1000 : 100;
             const val = (f: any, div = 1) => (f !== '-' && f !== undefined && f !== null) ? f / div : undefined;
             const valPos = (f: any, div = 1) => { const v = val(f, div); return v !== undefined && v > 0 ? v : undefined; };
-            next[`idx_${code}`] = {
+            // 存 plain key（不用 idx_ 前缀），和 fetchBatch 保持一致
+            next[code] = {
               p: item.f2 !== '-' && item.f2 !== undefined ? (item.f2 / pScale).toFixed(2) : undefined,
               cp: item.f3 !== '-' && item.f3 !== undefined ? (item.f3 / 100).toFixed(2) : undefined,
-              pe: valPos(item.f9, 100), pb: valPos(item.f23, 100), dy: valPos(item.f133),
+              pe: valPos(item.f9, 100),
+              pb: valPos(item.f23, 100),
+              dy: valPos(item.f133),
               mcap: valPos(item.f20, 100000000),
+              // 保留已有字段（fetchBatch 可能已写入更完整的数据）
+              ...next[code],
             };
           });
           return next;
@@ -175,7 +185,7 @@ export function useBatchData(
     } catch (e) {
       if ((e as Error).message !== 'duplicate') console.warn('[IndIdx] failed:', e);
     }
-  }, [allCodesStr, setBatchData]);
+  }, [allIndustriesStr, setBatchData]);
 
   useEffect(() => {
     fetchBatch();
