@@ -111,7 +111,7 @@ export function useIndexValuation(
       const priceScale = idx.m === 'HK' ? 1000 : 100;
       const d = await jsonp(
         `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f23,f162,f167,f173&cb=jsonp_ixval`,
-        { key: `ixval_${idx.c}`, timeout: 8000 },
+        { timeout: 8000 },
       );
 
       if (d?.data) {
@@ -206,7 +206,7 @@ export function useIndexValuation(
         const priceScale = idx.m === 'HK' ? 1000 : 100;
         const d = await jsonp(
           `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f2,f3,f9,f23,f162,f167,f173&cb=jsonp_ixpr`,
-          { key: `ixpr_${idx.c}`, timeout: 8000 },
+          { timeout: 8000 },
         );
 
         if (d?.data) {
