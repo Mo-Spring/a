@@ -100,7 +100,7 @@ async function fetchBalanceSheetData(code: string): Promise<Map<string, { totalA
   try {
     const cbName = `fin_bs_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY,BPS';
+    const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY';
     const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
     const data = await jsonp(url, cbName);
     const items = data?.result?.data || [];
