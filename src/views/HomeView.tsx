@@ -33,32 +33,22 @@ const HomeView = () => {
 
       {/* Stats Row */}
       <div className="grid grid-cols-3 gap-2.5">
-        {(() => {
-          const indVals = currentIndustries.map(ind => getIndustryValuation(ind, batchData));
-          const avg = (arr: (string | number | undefined)[]) => {
-            const nums = arr.filter(v => v !== undefined && v !== '' && Number(v) > 0).map(Number);
-            return nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '—';
-          };
-          const avgPE = avg(indVals.map(v => v.pe));
-          const avgPB = avg(indVals.map(v => v.pb));
-          const avgDY = avg(indVals.map(v => v.dy));
-          return (
-            <>
-              <div className="stat-cell">
-                <div className="stat-label">平均PE</div>
-                <div className="text-xl font-extrabold text-brand-600 tabular-nums">{avgPE}</div>
-              </div>
-              <div className="stat-cell">
-                <div className="stat-label">平均PB</div>
-                <div className="text-xl font-extrabold text-cyan-600 tabular-nums">{avgPB}</div>
-              </div>
-              <div className="stat-cell">
-                <div className="stat-label">平均股息率</div>
-                <div className="text-xl font-extrabold text-emerald-600 tabular-nums">{avgDY !== '—' ? `${avgDY}%` : '—'}</div>
-              </div>
-            </>
-          );
-        })()}
+        <div className="stat-cell">
+          <div className="stat-label">一级行业</div>
+          <div className="text-xl font-extrabold text-brand-600 tabular-nums">{currentIndustries.length}</div>
+        </div>
+        <div className="stat-cell">
+          <div className="stat-label">相关公司</div>
+          <div className="text-xl font-extrabold text-cyan-600 tabular-nums">
+            {currentIndustries.reduce((a, i) => a + i.l2.reduce((b, s) => b + (s.cs || []).length, 0), 0)}
+          </div>
+        </div>
+        <div className="stat-cell">
+          <div className="stat-label">低估行业</div>
+          <div className="text-xl font-extrabold text-emerald-600 tabular-nums">
+            {currentIndustries.filter(i => getIndustryValuation(i, batchData).ev === 'low').length}
+          </div>
+        </div>
       </div>
 
       {/* Filter Pills */}
