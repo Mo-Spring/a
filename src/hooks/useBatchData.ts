@@ -35,6 +35,7 @@ function parsePush2Item(item: any): { code: string; data: MarketData } {
       pe: valPos(item.f9, 100),
       pb: valPos(item.f23, 100),
       dy: valPos(item.f133),
+      ps: valPos(item.f188, 100),
       roe: val(item.f37),
       eps: valPos(item.f112),
       mcap: valPos(item.f20, 100000000),
@@ -87,7 +88,7 @@ function buildSecids(
   });
 }
 
-const BATCH_FIELDS = 'f2,f3,f9,f12,f13,f14,f20,f23,f37,f57,f112,f113,f116,f117,f133,f137,f138';
+const BATCH_FIELDS = 'f2,f3,f9,f12,f13,f14,f20,f23,f37,f57,f112,f113,f116,f117,f133,f137,f138,f188';
 const CHUNK_SIZE = 100;
 
 export function useBatchData(
@@ -167,6 +168,7 @@ export function useBatchData(
               pe: valPos(item.f9, 100),
               pb: valPos(item.f23, 100),
               dy: valPos(item.f133),
+              ps: valPos(item.f188, 100),
               mcap: valPos(item.f20, 100000000),
               // 保留已有字段（fetchBatch 可能已写入更完整的数据）
               ...next[code],
