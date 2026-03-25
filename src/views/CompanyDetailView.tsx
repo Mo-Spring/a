@@ -1,9 +1,10 @@
-import React from 'react';
-import { ChevronRight, Star, Trash2, TrendingUp, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronRight, Star, Trash2, TrendingUp, Loader2, BarChart3, Calculator } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Industry } from '../types';
 import { useAppContext } from '../AppContext';
 import { getGrade, gColor } from '../helpers';
+import FinancialStatementsView from './FinancialStatementsView';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
@@ -50,6 +51,7 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
 
   const ii = currentIndustries.findIndex(i => i.id === ind?.id);
 
+  const [detailTab, setDetailTab] = useState<'valuation' | 'financial'>('valuation');
   const isLoading = stockDetailLoading[tCode];
   const valResult = valuationResults[tCode];
   const stmts = stockStatements[tCode] || [];
@@ -265,7 +267,32 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
           ))}
         </div>
 
-        {currentPE > 0 && (
+        {/* Detail Tabs */}
+        <div className="flex gap-2 bg-slate-100 rounded-2xl p-1">
+          <button
+            onClick={() => setDetailTab('valuation')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+              detailTab === 'valuation'
+                ? 'bg-white text-indigo-600 shadow-sm'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <Calculator size={14} /> 估值分析
+          </button>
+          <button
+            onClick={() => setDetailTab('financial')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+              detailTab === 'financial'
+                ? 'bg-white text-indigo-600 shadow-sm'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <BarChart3 size={14} /> 财务数据
+          </button>
+        </div>
+
+        {/* 估值分析 Tab */}
+        {detailTab === 'valuation' && currentPE > 0 && (
           <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-indigo-600 flex items-center gap-1">
@@ -481,6 +508,12 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
           </div>
         )}
 
+        {/* 财务数据 Tab */}
+        {detailTab === 'financial' && (
+          <FinancialStatementsView stmts={stmts} code={tCode} batchData={batchData} />
+        )}
+
+        {/* 概览卡片（始终显示） */}
         <div className="p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-xl text-xs text-slate-600 leading-relaxed">
           {currentROE >= 20 ? '✅ ROE ' + currentROE + '% 优秀 ' : currentROE >= 10 ? '⚠️ ROE ' + currentROE + '% 中等 ' : '❌ ROE 仅 ' + currentROE + '% '}
           {currentDY >= 3 ? '✅ 股息率 ' + currentDY + '% ' : 'ℹ️ 股息率 ' + currentDY + '% '}
