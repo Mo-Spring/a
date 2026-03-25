@@ -310,15 +310,18 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
             </div>
 
             {/* ① DCF */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500 font-medium">
-                  ① DCF 现金流折现
-                  <span className="text-[9px] ml-1 opacity-60">权重 {(modelWeights.dcf * 100).toFixed(0)}%</span>
-                </span>
-                <span className="font-mono font-bold text-slate-700">
-                  ¥{dcfFair.low.toFixed(1)} ~ ¥{dcfFair.high.toFixed(1)}
-                </span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">①</span>
+                  <span className="text-xs font-bold text-slate-700">DCF 现金流折现</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-slate-400 font-medium">权重 {(modelWeights.dcf * 100).toFixed(0)}%</span>
+                  <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg tabular-nums">
+                    ¥{dcfFair.low.toFixed(1)} ~ ¥{dcfFair.high.toFixed(1)}
+                  </span>
+                </div>
               </div>
               <div className="text-[9px] text-slate-400 font-medium leading-relaxed">
                 WACC {(dcfWacc * 100).toFixed(1)}%
@@ -358,30 +361,82 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
             <div className="border-b border-slate-200" />
 
             {/* ② PE 相对估值 */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500 font-medium">
-                  ② PE 相对估值
-                  <span className="text-[9px] ml-1 opacity-60">权重 {(modelWeights.relative * 100).toFixed(0)}%</span>
-                </span>
-                <span className="font-mono font-bold text-slate-700">
-                  PE {relFairPE.low.toFixed(1)} ~ {relFairPE.high.toFixed(1)}x → ¥{relFairPrice.low.toFixed(1)} ~ ¥{relFairPrice.high.toFixed(1)}
-                </span>
-              </div>
-              <div className="text-[9px] text-slate-400 font-medium leading-relaxed">
-                行业PE {relIndustryPE.toFixed(1)} · 历史修正PE {relHistoricalPE.toFixed(1)} · PEG {relPEG.toFixed(2)} (合理PE {relPEGPE.toFixed(1)})
-              </div>
-              {relHistoricalStats && (
-                <div className="flex items-center gap-2 text-[9px]">
-                  <span className="text-slate-400 whitespace-nowrap">PE {relHistoricalStats.min.toFixed(1)}</span>
-                  <div className="flex-1 h-2 bg-slate-200 rounded-full relative">
-                    <div className="absolute h-full bg-gradient-to-r from-emerald-200 via-amber-200 to-red-200 rounded-full" style={{ width: '100%' }} />
-                    <div className="absolute top-0 h-full w-0.5 bg-indigo-600 rounded" style={{ left: `${relHistoricalStats.percentile * 100}%` }} title={`当前 PE ${relHistoricalStats.current.toFixed(1)}`} />
-                  </div>
-                  <span className="text-slate-400 whitespace-nowrap">{relHistoricalStats.max.toFixed(1)}</span>
-                  <span className={`font-bold ${relHistoricalStats.percentile < 0.3 ? 'text-emerald-600' : relHistoricalStats.percentile > 0.7 ? 'text-red-500' : 'text-amber-600'}`}>
-                    {(relHistoricalStats.percentile * 100).toFixed(0)}%
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">②</span>
+                  <span className="text-xs font-bold text-slate-700">PE 相对估值</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-slate-400 font-medium">权重 {(modelWeights.relative * 100).toFixed(0)}%</span>
+                  <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg tabular-nums">
+                    PE {relFairPE.mid.toFixed(1)}x
                   </span>
+                </div>
+              </div>
+
+              {/* 三源估值卡片 */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl p-2.5 text-center border border-blue-100/50">
+                  <div className="text-[8px] text-blue-400 font-bold uppercase tracking-wider mb-1">行业PE</div>
+                  <div className="text-sm font-bold text-blue-700 tabular-nums">{relIndustryPE.toFixed(1)}</div>
+                  <div className="text-[8px] text-blue-400 mt-0.5">同业对标</div>
+                </div>
+                <div className="bg-gradient-to-br from-violet-50 to-violet-100/50 rounded-xl p-2.5 text-center border border-violet-100/50">
+                  <div className="text-[8px] text-violet-400 font-bold uppercase tracking-wider mb-1">历史PE</div>
+                  <div className="text-sm font-bold text-violet-700 tabular-nums">{relHistoricalPE.toFixed(1)}</div>
+                  <div className="text-[8px] text-violet-400 mt-0.5">ROE修正</div>
+                </div>
+                <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl p-2.5 text-center border border-amber-100/50">
+                  <div className="text-[8px] text-amber-400 font-bold uppercase tracking-wider mb-1">PEG PE</div>
+                  <div className="text-sm font-bold text-amber-700 tabular-nums">{relPEGPE.toFixed(1)}</div>
+                  <div className="text-[8px] text-amber-400 mt-0.5">PEG {relPEG.toFixed(2)}</div>
+                </div>
+              </div>
+
+              {/* 合理价格区间 */}
+              <div className="bg-slate-50 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-[9px] text-slate-400 font-bold">合理价格区间</div>
+                  <div className="text-xs font-bold text-slate-700 tabular-nums mt-0.5">
+                    ¥{relFairPrice.low.toFixed(1)} <span className="text-slate-300 mx-0.5">—</span> ¥{relFairPrice.high.toFixed(1)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[9px] text-slate-400 font-bold">合理 PE 区间</div>
+                  <div className="text-xs font-bold text-indigo-600 tabular-nums mt-0.5">
+                    {relFairPE.low.toFixed(1)}x <span className="text-slate-300 mx-0.5">—</span> {relFairPE.high.toFixed(1)}x
+                  </div>
+                </div>
+              </div>
+
+              {/* PE 历史百分位 */}
+              {relHistoricalStats && (
+                <div className="bg-white rounded-xl p-3 border border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-slate-500">PE 历史百分位</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
+                      relHistoricalStats.percentile < 0.3 ? 'bg-emerald-50 text-emerald-600' :
+                      relHistoricalStats.percentile > 0.7 ? 'bg-red-50 text-red-600' :
+                      'bg-amber-50 text-amber-600'
+                    }`}>
+                      {(relHistoricalStats.percentile * 100).toFixed(0)}%
+                      {relHistoricalStats.percentile < 0.3 ? ' 偏低' : relHistoricalStats.percentile > 0.7 ? ' 偏高' : ' 适中'}
+                    </span>
+                  </div>
+                  <div className="relative h-3 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-300 via-amber-300 to-red-300 rounded-full" />
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md border-2 border-indigo-500 z-10 transition-all duration-500"
+                      style={{ left: `calc(${relHistoricalStats.percentile * 100}% - 6px)` }}
+                      title={`当前 PE ${relHistoricalStats.current.toFixed(1)}`}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-400 tabular-nums">
+                    <span>{relHistoricalStats.min.toFixed(1)}x</span>
+                    <span className="font-bold text-indigo-600">当前 {relHistoricalStats.current.toFixed(1)}x</span>
+                    <span>{relHistoricalStats.max.toFixed(1)}x</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -389,25 +444,47 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
 
             {/* 护城河评分 */}
             {moatSignals.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-bold text-slate-500">护城河评分</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {moatSignals.map((ms: any, i: number) => (
-                    <div key={i} className="bg-white rounded-xl p-2 border border-slate-100">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-medium text-slate-600">{ms.label}</span>
-                        <span className={`text-[10px] font-bold ${
-                          ms.level === 'strong' ? 'text-emerald-600' : ms.level === 'good' ? 'text-blue-600' : ms.level === 'average' ? 'text-amber-600' : 'text-red-500'
-                        }`}>{ms.score}</span>
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-700">🏰 护城河评分</span>
+                  <span className="text-[9px] text-slate-400">
+                    平均 {Math.round(moatSignals.reduce((s: number, ms: any) => s + ms.score, 0) / moatSignals.length)}分
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {moatSignals.map((ms: any, i: number) => {
+                    const levelConfig: Record<string, { bg: string; bar: string; ring: string; text: string; label: string }> = {
+                      strong: { bg: 'from-emerald-50 to-emerald-100/40', bar: 'bg-emerald-500', ring: 'ring-emerald-200', text: 'text-emerald-700', label: '强' },
+                      good: { bg: 'from-blue-50 to-blue-100/40', bar: 'bg-blue-500', ring: 'ring-blue-200', text: 'text-blue-700', label: '良' },
+                      average: { bg: 'from-amber-50 to-amber-100/40', bar: 'bg-amber-500', ring: 'ring-amber-200', text: 'text-amber-700', label: '中' },
+                      weak: { bg: 'from-red-50 to-red-100/40', bar: 'bg-red-400', ring: 'ring-red-200', text: 'text-red-700', label: '弱' },
+                    };
+                    const cfg = levelConfig[ms.level] || levelConfig.average;
+                    return (
+                      <div key={i} className={`bg-gradient-to-r ${cfg.bg} rounded-xl p-3 border border-white/60`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center ring-2 ${cfg.ring} shadow-sm`}>
+                              <span className={`text-sm font-bold ${cfg.text}`}>{ms.score}</span>
+                            </div>
+                            <div>
+                              <div className="text-[11px] font-bold text-slate-700">{ms.label}</div>
+                              <div className={`text-[9px] font-bold ${cfg.text}`}>{cfg.label}</div>
+                            </div>
+                          </div>
+                          <div className="w-20">
+                            <div className="w-full h-2 bg-white/60 rounded-full overflow-hidden shadow-inner">
+                              <div
+                                className={`h-full rounded-full ${cfg.bar} transition-all duration-700`}
+                                style={{ width: `${ms.score}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-[9px] text-slate-500 leading-relaxed pl-10">{ms.detail}</div>
                       </div>
-                      <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${
-                          ms.level === 'strong' ? 'bg-emerald-500' : ms.level === 'good' ? 'bg-blue-500' : ms.level === 'average' ? 'bg-amber-500' : 'bg-red-400'
-                        }`} style={{ width: `${ms.score}%` }} />
-                      </div>
-                      <div className="text-[8px] text-slate-400 mt-0.5 truncate" title={ms.detail}>{ms.detail}</div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -415,17 +492,23 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
             {/* 清算底线 + 市场预期 */}
             <div className="grid grid-cols-2 gap-2">
               {liquidationPrice > 0 && (
-                <div className="bg-white rounded-xl p-2.5 border border-slate-100 text-center">
-                  <div className="text-[9px] text-slate-400 font-bold mb-0.5">清算底线</div>
-                  <div className="text-sm font-bold text-slate-700">¥{liquidationPrice.toFixed(2)}</div>
-                  <div className="text-[8px] text-slate-400">0.7 × 每股净资产</div>
+                <div className="bg-gradient-to-br from-slate-50 to-slate-100/50 rounded-xl p-3 border border-slate-100">
+                  <div className="flex items-center gap-1 mb-1.5">
+                    <span className="text-[9px]">🛡️</span>
+                    <span className="text-[9px] text-slate-400 font-bold">清算底线</span>
+                  </div>
+                  <div className="text-lg font-bold text-slate-800 tabular-nums">¥{liquidationPrice.toFixed(2)}</div>
+                  <div className="text-[8px] text-slate-400 mt-1">0.7 × 每股净资产</div>
                 </div>
               )}
               {impliedGrowth !== null && (
-                <div className="bg-white rounded-xl p-2.5 border border-slate-100 text-center">
-                  <div className="text-[9px] text-slate-400 font-bold mb-0.5">市场隐含增长</div>
-                  <div className="text-sm font-bold text-indigo-600">{(impliedGrowth * 100).toFixed(1)}%</div>
-                  <div className="text-[8px] text-slate-400">当前股价暗含的年化增速</div>
+                <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/40 rounded-xl p-3 border border-indigo-100/50">
+                  <div className="flex items-center gap-1 mb-1.5">
+                    <span className="text-[9px]">📈</span>
+                    <span className="text-[9px] text-indigo-400 font-bold">市场隐含增长</span>
+                  </div>
+                  <div className="text-lg font-bold text-indigo-700 tabular-nums">{(impliedGrowth * 100).toFixed(1)}%</div>
+                  <div className="text-[8px] text-indigo-400 mt-1">当前股价暗含的年化增速</div>
                 </div>
               )}
             </div>
