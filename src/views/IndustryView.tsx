@@ -74,7 +74,7 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
             </div>
           </div>
         )}
-        
+
         <div className="grid grid-cols-3 gap-2 mb-4">
           {(() => {
             const metrics = [
@@ -83,7 +83,6 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
               { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '' },
               { label: '总市值', val: indVal.mcap ? `${Number(indVal.mcap).toFixed(0)}亿` : '' },
               { label: '涨跌幅', val: indVal.cp !== undefined ? `${parseFloat(indVal.cp) >= 0 ? '+' : ''}${indVal.cp}%` : '' },
-              { label: '估值', val: indVal.ev ? evText(indVal.ev) : '' },
             ].filter(m => m.val);
             if (metrics.length === 0) {
               return <div className="col-span-3 text-center text-[10px] text-slate-400 py-3">暂无行业估值数据</div>;
