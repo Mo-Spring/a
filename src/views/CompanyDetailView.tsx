@@ -239,10 +239,10 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
               { l: 'PB', v: livePrice?.pb || bd?.pb?.toFixed(2) || '—' },
               { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
               { l: '股息率', v: bd?.dy ? `${bd.dy.toFixed(1)}%` : livePrice?.dy ? `${livePrice.dy}%` : '—' },
-              { l: 'PE百分位', v: pePct !== undefined && pePct !== null ? `${pePct.toFixed(0)}%` : '—' },
+              { l: 'PE百分位', v: pePct !== undefined && pePct !== null && pePct > 0 ? `${pePct.toFixed(0)}%` : '—' },
               { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (bd?.mcap ? `${bd.mcap.toFixed(0)}亿` : '—') },
               { l: 'EPS', v: epsVal > 0 ? epsVal.toFixed(2) : '—' },
-              { l: 'PB百分位', v: pbPct !== undefined && pbPct !== null ? `${pbPct.toFixed(0)}%` : '—' },
+              { l: 'PB百分位', v: pbPct !== undefined && pbPct !== null && pbPct > 0 ? `${pbPct.toFixed(0)}%` : '—' },
               { l: '负债率', v: debtVal > 0 && debtVal <= 100 ? `${debtVal.toFixed(1)}%` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
