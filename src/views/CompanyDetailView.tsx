@@ -229,24 +229,24 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
 
         <div className="grid grid-cols-3 gap-2">
           {(() => {
-            const latestStmt = stmts.length > 0 ? stmts[0] : undefined;
-            const epsVal = batchData[tCode]?.eps || (currentPE > 0 && currentPrice > 0 ? currentPrice / currentPE : 0);
-            const roaVal = batchData[tCode]?.roa || (latestStmt && latestStmt.totalAssets > 0 ? (latestStmt.netIncome / latestStmt.totalAssets) * 100 : 0);
-            const psVal = batchData[tCode]?.ps || (latestStmt && batchData[tCode]?.mcap ? latestStmt.revenue / batchData[tCode].mcap : 0);
-            const debtVal = batchData[tCode]?.debt || (latestStmt ? latestStmt.debtRatio : 0);
+            const bd = batchData[tCode];
+            const epsVal = bd?.eps || (currentPE > 0 && currentPrice > 0 ? currentPrice / currentPE : 0);
+            const debtVal = bd?.debt || 0;
+            const pePct = bd?.pePct;
+            const pbPct = bd?.pbPct;
             return [
-              { l: 'PE', v: livePrice?.pe || batchData[tCode]?.pe?.toFixed(1) || '—' },
-              { l: 'PB', v: livePrice?.pb || batchData[tCode]?.pb?.toFixed(2) || '—' },
+              { l: 'PE', v: livePrice?.pe || bd?.pe?.toFixed(1) || '—' },
+              { l: 'PB', v: livePrice?.pb || bd?.pb?.toFixed(2) || '—' },
               { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
-              { l: '股息率', v: batchData[tCode]?.dy ? `${batchData[tCode].dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—') },
-              { l: 'PS', v: psVal > 0 ? psVal.toFixed(1) : '—' },
-              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (batchData[tCode]?.mcap ? `${batchData[tCode].mcap.toFixed(0)}亿` : '—') },
+              { l: '股息率', v: bd?.dy ? `${bd.dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—' }),
+              { l: 'PE百分位', v: pePct !== undefined && pePct !== null ? `${pePct.toFixed(0)}%` : '—' },
+              { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (bd?.mcap ? `${bd.mcap.toFixed(0)}亿` : '—') },
               { l: 'EPS', v: epsVal > 0 ? epsVal.toFixed(2) : '—' },
-              { l: 'ROA', v: roaVal !== 0 ? `${roaVal.toFixed(1)}%` : '—' },
+              { l: 'PB百分位', v: pbPct !== undefined && pbPct !== null ? `${pbPct.toFixed(0)}%` : '—' },
               { l: '负债率', v: debtVal > 0 && debtVal <= 100 ? `${debtVal.toFixed(1)}%` : '—' },
             ].map(m => (
               <div key={m.l} className="bg-slate-50 rounded-xl p-2 text-center">
-                <div className="text-[9px] text-slate-400 font-bold uppercase">{m.l}</div>
+                <div className="text-[9px] text-slate-400 font-bold">{m.l}</div>
                 <div className="text-sm font-bold text-slate-700">{m.v}</div>
               </div>
             ));
