@@ -238,7 +238,7 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
               { l: 'PE', v: livePrice?.pe || bd?.pe?.toFixed(1) || '—' },
               { l: 'PB', v: livePrice?.pb || bd?.pb?.toFixed(2) || '—' },
               { l: 'ROE', v: currentROE > 0 ? `${currentROE.toFixed(1)}%` : '—' },
-              { l: '股息率', v: bd?.dy ? `${bd.dy.toFixed(1)}%` : (livePrice?.dy ? `${livePrice.dy}%` : '—' }),
+              { l: '股息率', v: bd?.dy ? `${bd.dy.toFixed(1)}%` : livePrice?.dy ? `${livePrice.dy}%` : '—' },
               { l: 'PE百分位', v: pePct !== undefined && pePct !== null ? `${pePct.toFixed(0)}%` : '—' },
               { l: '市值', v: livePrice?.mcap ? `${livePrice.mcap}亿` : (bd?.mcap ? `${bd.mcap.toFixed(0)}亿` : '—') },
               { l: 'EPS', v: epsVal > 0 ? epsVal.toFixed(2) : '—' },
