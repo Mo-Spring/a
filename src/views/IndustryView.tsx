@@ -53,7 +53,7 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
             <div className="stat-label mb-2">相关指数</div>
             <div className="flex flex-wrap gap-2">
               {ind.indices.map(idxInfo => {
-                const bd = batchData[`idx_${idxInfo.c}`] || batchData[idxInfo.c];
+                const bd = batchData[idxInfo.c];
                 return (
                   <button
                     key={idxInfo.c}
