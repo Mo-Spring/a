@@ -41,8 +41,8 @@ function parsePush2Item(item: any): { code: string; data: MarketData } {
       mcap: valPos(item.f20, 100000000),
       fcap: valPos(item.f117),
       debt: val(item.f57),
-      pePct: val(item.f137),
-      pbPct: val(item.f138),
+      pePct: valPos(item.f137),
+      pbPct: valPos(item.f138),
       dividendPerShare: (item.f133 !== '-' && item.f133 !== undefined && item.f133 > 0 && item.f2 > 0)
         ? (item.f2 / pScale) * (item.f133 / 100) : undefined,
     },
