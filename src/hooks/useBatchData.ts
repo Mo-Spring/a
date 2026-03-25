@@ -10,7 +10,7 @@
  * 数据源：东方财富 push2 JSONP API
  */
 
-import { useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';import { Industry, Index } from '../types';
+import { useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';import { Industry, Index } from '../types';
 import { MarketData } from '../types/market';
 import { jsonp, cleanupAllJsonp } from '../utils/jsonp';
 
@@ -96,12 +96,6 @@ export function useBatchData(
   allCodesStr: string,
   setBatchData: Dispatch<SetStateAction<Record<string, MarketData>>>,
 ) {
-  // 从 allIndustries 推导稳定依赖字符串（用于 fetchIndustryIndices 的依赖）
-  const allIndustriesStr = useMemo(
-    () => JSON.stringify(allIndustries.flatMap(ind => (ind.indices || []).map(idx => idx.c))),
-    [allIndustries],
-  );
-
   // 主批量行情
   const fetchBatch = useCallback(async () => {
     const secidsList = buildSecids(allIndustries, indices);
@@ -124,7 +118,6 @@ export function useBatchData(
         const d = await jsonp(
           `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=${BATCH_FIELDS}&cb=jsonp_batch`,
           {
-            key: `batch_${i}`,
             timeout: 15000,
             fetchFallback: `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${chunk}&fields=${BATCH_FIELDS}`,
           },
@@ -156,7 +149,7 @@ export function useBatchData(
     try {
       const d = await jsonp(
         `https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${secids}&fields=${BATCH_FIELDS}&cb=jsonp_indidx`,
-        { key: `indidx_${allIndustriesStr}`, timeout: 10000 },
+        { timeout: 10000 },
       );
       if (d?.data?.diff) {
         setBatchData(prev => {
@@ -185,7 +178,7 @@ export function useBatchData(
     } catch (e) {
       if ((e as Error).message !== 'duplicate') console.warn('[IndIdx] failed:', e);
     }
-  }, [allIndustriesStr, setBatchData]);
+  }, [allCodesStr, setBatchData]);
 
   useEffect(() => {
     fetchBatch();
