@@ -58,8 +58,8 @@ const HomeView = () => {
             key={t}
             onClick={() => setFilter(t)}
             className={`flex-1 py-2 px-4 text-xs font-bold rounded-xl transition-all duration-200 whitespace-nowrap ${
-              filter === t 
-                ? 'bg-slate-900 text-white shadow-md' 
+              filter === t
+                ? 'bg-slate-900 text-white shadow-md'
                 : 'text-slate-400'
             }`}
           >
@@ -110,12 +110,14 @@ const HomeView = () => {
                   <div className="stat-value">{indVal.pe}</div>
                 </div>
                 <div className="stat-cell py-2">
-                  <div className="stat-label">PB</div>
-                  <div className="stat-value">{indVal.pb}</div>
+                  <div className="stat-label">总市值</div>
+                  <div className="stat-value">{indVal.mcap ? `${Number(indVal.mcap).toFixed(0)}亿` : '—'}</div>
                 </div>
                 <div className="stat-cell py-2">
-                  <div className="stat-label">股息率</div>
-                  <div className="stat-value">{indVal.dy}%</div>
+                  <div className="stat-label">涨跌幅</div>
+                  <div className={`stat-value ${indVal.cp !== undefined ? (parseFloat(indVal.cp) >= 0 ? 'text-red-500' : 'text-emerald-500') : ''}`}>
+                    {indVal.cp !== undefined ? `${parseFloat(indVal.cp) >= 0 ? '+' : ''}${indVal.cp}%` : '—'}
+                  </div>
                 </div>
               </div>
             )}
