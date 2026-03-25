@@ -5,44 +5,28 @@
  * 1. 实时行情（PE/PB/价格/涨跌幅）— 通过 App.tsx 中的 JSONP 10s 轮询
  * 2. 财务报表（三表数据）— 通过本模块获取，存 localStorage，7 天刷新一次
  *
- * 数据源：东方财富 datacenter JSONP API
+ * 数据源：东方财富 datacenter API（支持 CORS，返回纯 JSON，用 fetch 替代 JSONP）
  */
 
 import type { FinancialStatement, CachedValuationData } from '../valuation/types';
 
-// ─── JSONP 工具 ───
+// ─── Fetch 工具（替代 JSONP）──
 
-function jsonp(url: string, callbackName: string, timeoutMs = 10000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`JSONP timeout`));
-    }, timeoutMs);
-
-    const cleanup = () => {
-      clearTimeout(timer);
-      delete (window as any)[callbackName];
-      const el = document.getElementById(callbackName);
-      if (el) el.remove();
-    };
-
-    (window as any)[callbackName] = (data: any) => {
-      cleanup();
-      resolve(data);
-    };
-
-    const script = document.createElement('script');
-    script.id = callbackName;
-    script.src = url;
-    script.onerror = () => { cleanup(); reject(new Error('JSONP load error')); };
-    document.head.appendChild(script);
-  });
+async function fetchJson(url: string, timeoutMs = 10000): Promise<any> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── 东方财富：利润表 + 关键指标 ───
 
 async function fetchMainFinanceData(code: string): Promise<any[]> {
-  const cbName = `fin_main_${code}_${Date.now()}`;
   const filter = `(SECURITY_CODE="${code}")`;
   const columns = [
     'SECURITY_CODE', 'REPORT_DATE',
@@ -52,8 +36,8 @@ async function fetchMainFinanceData(code: string): Promise<any[]> {
     'TOTALOPERATEREVETZ', 'PARENTNETPROFITTZ',
     'BPS',
   ].join(',');
-  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
-  const data = await jsonp(url, cbName);
+  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE`;
+  const data = await fetchJson(url);
   return data?.result?.data || [];
 }
 
@@ -63,12 +47,10 @@ async function fetchCashFlowData(code: string): Promise<Map<string, { operatingC
   const result = new Map<string, { operatingCF: number; investingCF: number; financingCF: number; capex: number; dividendPaid: number }>();
 
   try {
-    const cbName = `fin_cf_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    // 现金流量表关键字段（新字段名）
     const columns = 'SECURITY_CODE,REPORT_DATE,NETCASH_OPERATE,NETCASH_INVEST,NETCASH_FINANCE,CONSTRUCT_LONG_ASSET,ASSIGN_DIVIDEND_PORFIT,SUBSIDIARY_PAY_DIVIDEND';
-    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GCASHFLOW&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
-    const data = await jsonp(url, cbName);
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GCASHFLOW&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE`;
+    const data = await fetchJson(url);
     const items = data?.result?.data || [];
 
     for (const item of items) {
@@ -78,9 +60,7 @@ async function fetchCashFlowData(code: string): Promise<Map<string, { operatingC
       const operatingCF = (item.NETCASH_OPERATE || 0) / 1e8;
       const investingCF = (item.NETCASH_INVEST || 0) / 1e8;
       const financingCF = (item.NETCASH_FINANCE || 0) / 1e8;
-      // 资本支出：购建固定资产等
       const capex = Math.abs((item.CONSTRUCT_LONG_ASSET || 0) / 1e8);
-      // 分红支出
       const dividendPaid = Math.abs(((item.ASSIGN_DIVIDEND_PORFIT || 0) + (item.SUBSIDIARY_PAY_DIVIDEND || 0)) / 1e8);
 
       result.set(year, { operatingCF, investingCF, financingCF, capex, dividendPaid });
@@ -98,11 +78,10 @@ async function fetchBalanceSheetData(code: string): Promise<Map<string, { totalA
   const result = new Map<string, { totalAssets: number; totalEquity: number; totalDebt: number; bvps: number }>();
 
   try {
-    const cbName = `fin_bs_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
     const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY';
-    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
-    const data = await jsonp(url, cbName);
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE`;
+    const data = await fetchJson(url);
     const items = data?.result?.data || [];
 
     for (const item of items) {
@@ -129,11 +108,10 @@ async function fetchPerShareData(code: string): Promise<Map<string, { eps: numbe
   const result = new Map<string, { eps: number; bvps: number; roe: number }>();
 
   try {
-    const cbName = `fin_ps_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
     const columns = 'SECURITY_CODE,REPORT_DATE,EPSJB,BPS,ROEJQ';
-    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
-    const data = await jsonp(url, cbName);
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE`;
+    const data = await fetchJson(url);
     const items = data?.result?.data || [];
 
     for (const item of items) {
@@ -220,10 +198,9 @@ export async function fetchFinancialStatements(code: string): Promise<FinancialS
 
     const revenue = (item.TOTALOPERATEREVE || 0) / 1e8;
     const netIncome = (item.PARENTNETPROFIT || 0) / 1e8;
-    // 毛利 = 营收 - 成本，MLR 字段就是毛利（如茅台 MLR=1172亿）
     const grossProfit = (item.MLR || 0) / 1e8;
     const costOfRevenue = grossProfit > 0 ? revenue - grossProfit : 0;
-    const operatingProfit = netIncome; // 此接口无单独营业利润字段，用归母净利润近似
+    const operatingProfit = netIncome;
 
     const reportDate = item.REPORT_DATE || '';
 
@@ -281,7 +258,7 @@ function loadFromCache(code: string): FinancialStatement[] | null {
     const raw = localStorage.getItem(getCacheKey(code));
     if (!raw) return null;
     const cached: CachedValuationData = JSON.parse(raw);
-    if (Date.now() - cached.fetchedAt > cached.ttl) return null; // 过期
+    if (Date.now() - cached.fetchedAt > cached.ttl) return null;
     return cached.statements;
   } catch {
     return null;
@@ -304,16 +281,13 @@ function saveToCache(code: string, statements: FinancialStatement[]): void {
 
 /** 带缓存的获取财务报表 */
 export async function fetchFinancialStatementsCached(code: string): Promise<FinancialStatement[]> {
-  // 1. 先查缓存
   const cached = loadFromCache(code);
   if (cached && cached.length > 0) {
-    // 后台静默刷新（超过 1 天）
     const raw = localStorage.getItem(getCacheKey(code));
     if (raw) {
       try {
         const c: CachedValuationData = JSON.parse(raw);
         if (Date.now() - c.fetchedAt > 24 * 60 * 60 * 1000) {
-          // 后台刷新
           fetchFinancialStatements(code).then(stmts => {
             if (stmts.length > 0) saveToCache(code, stmts);
           }).catch(() => {});
@@ -323,7 +297,6 @@ export async function fetchFinancialStatementsCached(code: string): Promise<Fina
     return cached;
   }
 
-  // 2. 缓存没有，实时获取
   const statements = await fetchFinancialStatements(code);
   if (statements.length > 0) {
     saveToCache(code, statements);
@@ -336,7 +309,6 @@ export function clearFinancialCache(code?: string): void {
   if (code) {
     localStorage.removeItem(getCacheKey(code));
   } else {
-    // 清除所有财务缓存
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
