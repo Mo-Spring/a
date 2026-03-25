@@ -181,12 +181,12 @@ const FavoritesView = () => {
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {[
-                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
-                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
-              ].map(m => (
+                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) },
+                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) },
+                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : undefined },
+                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : undefined },
+                { l: '市值', v: batchData[c.c]?.mcap ? `${batchData[c.c].mcap.toFixed(0)}亿` : undefined },
+              ].filter(m => m.v).map(m => (
                 <div key={m.l} className="stat-cell py-1.5">
                   <div className="stat-label text-[7px]">{m.l}</div>
                   <div className="text-[10px] font-bold text-slate-700 tabular-nums">{m.v}</div>
