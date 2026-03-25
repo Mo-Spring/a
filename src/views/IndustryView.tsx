@@ -51,24 +51,23 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
         {ind.indices && ind.indices.length > 0 && (
           <div className="mb-4">
             <div className="stat-label mb-2">相关指数</div>
-            <div className="flex flex-wrap gap-2">
+            <div className={`grid gap-2 ${ind.indices.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {ind.indices.map(idxInfo => {
                 const bd = batchData[idxInfo.c];
+                const isUp = bd?.cp ? parseFloat(bd.cp) >= 0 : false;
                 return (
                   <button
                     key={idxInfo.c}
                     onClick={() => navigate('index', idx, idxInfo.c)}
-                    className="stat-cell px-3 py-2 text-left active:scale-95 transition-transform"
+                    className="text-left p-2.5 rounded-xl border border-slate-100 bg-white hover:border-indigo-200 hover:bg-indigo-50/30 active:scale-[0.97] transition-all"
                   >
-                    <div className="text-[10px] font-bold text-slate-700">{idxInfo.n}</div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900 tabular-nums">{bd?.p || '—'}</span>
-                      {bd?.cp && (
-                        <span className={`text-[9px] font-bold tabular-nums ${parseFloat(bd.cp) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                          {parseFloat(bd.cp) >= 0 ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
-                        </span>
-                      )}
-                    </div>
+                    <div className="text-[10px] font-bold text-slate-500 truncate">{idxInfo.n}</div>
+                    <div className="text-sm font-extrabold text-slate-900 tabular-nums mt-0.5">{bd?.p || '—'}</div>
+                    {bd?.cp && (
+                      <span className={`inline-block text-[10px] font-bold tabular-nums mt-0.5 px-1.5 py-0.5 rounded-md ${isUp ? 'text-red-600 bg-red-50' : 'text-emerald-600 bg-emerald-50'}`}>
+                        {isUp ? '▲' : '▼'}{Math.abs(parseFloat(bd.cp)).toFixed(2)}%
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -77,19 +76,25 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
         )}
         
         <div className="grid grid-cols-3 gap-2 mb-4">
-          {[
-            { label: 'PE', val: indVal.pe || '—' },
-            { label: 'PB', val: indVal.pb || '—' },
-            { label: 'PS', val: indVal.ps || '—' },
-            { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '—' },
-            { label: '涨跌幅', val: indVal.cp !== undefined ? `${parseFloat(indVal.cp) >= 0 ? '+' : ''}${indVal.cp}%` : '—' },
-            { label: '总市值', val: indVal.mcap ? `${Number(indVal.mcap).toFixed(0)}亿` : '—' },
-          ].map(m => (
-            <div key={m.label} className="stat-cell">
-              <div className="stat-label">{m.label}</div>
-              <div className="stat-value">{m.val}</div>
-            </div>
-          ))}
+          {(() => {
+            const metrics = [
+              { label: 'PE', val: indVal.pe || '' },
+              { label: 'PB', val: indVal.pb || '' },
+              { label: '股息率', val: indVal.dy ? `${indVal.dy}%` : '' },
+              { label: '总市值', val: indVal.mcap ? `${Number(indVal.mcap).toFixed(0)}亿` : '' },
+              { label: '涨跌幅', val: indVal.cp !== undefined ? `${parseFloat(indVal.cp) >= 0 ? '+' : ''}${indVal.cp}%` : '' },
+              { label: '估值', val: indVal.ev ? evText(indVal.ev) : '' },
+            ].filter(m => m.val);
+            if (metrics.length === 0) {
+              return <div className="col-span-3 text-center text-[10px] text-slate-400 py-3">暂无行业估值数据</div>;
+            }
+            return metrics.map(m => (
+              <div key={m.label} className="stat-cell">
+                <div className="stat-label">{m.label}</div>
+                <div className="stat-value">{m.val}</div>
+              </div>
+            ));
+          })()}
         </div>
       </div>
 
@@ -138,12 +143,12 @@ const IndustryView = ({ idx }: IndustryViewProps) => {
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {[
-                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) || '—' },
-                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) || '—' },
-                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : '—' },
-                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : '—' },
-                { l: 'PS', v: batchData[c.c]?.ps?.toFixed(1) || '—' },
-              ].map(m => (
+                { l: 'PE', v: batchData[c.c]?.pe?.toFixed(1) },
+                { l: 'PB', v: batchData[c.c]?.pb?.toFixed(2) },
+                { l: 'ROE', v: batchData[c.c]?.roe ? `${batchData[c.c].roe.toFixed(1)}%` : undefined },
+                { l: '股息', v: batchData[c.c]?.dy ? `${batchData[c.c].dy.toFixed(1)}%` : undefined },
+                { l: '市值', v: batchData[c.c]?.mcap ? `${batchData[c.c].mcap.toFixed(0)}亿` : undefined },
+              ].filter(m => m.v).map(m => (
                 <div key={m.l} className="stat-cell py-1.5">
                   <div className="stat-label text-[7px]">{m.l}</div>
                   <div className="text-[10px] font-bold text-slate-700 tabular-nums">{m.v}</div>
