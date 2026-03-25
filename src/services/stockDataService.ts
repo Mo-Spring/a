@@ -46,12 +46,11 @@ async function fetchMainFinanceData(code: string): Promise<any[]> {
   const filter = `(SECURITY_CODE="${code}")`;
   const columns = [
     'SECURITY_CODE', 'REPORT_DATE',
-    'BASIC_EPS', 'WEIGHTAVG_ROE',
-    'OPERATE_INCOME', 'TOTAL_OPERATE_INCOME',
-    'OPERATE_COST', 'OPERATE_EXPENSE',
-    'PARENT_NETPROFIT', 'YSTZ', 'SJLTZ',
-    'TOI_SAME', 'PARENT_SAME',
-    'ASSIGNDSCRPT', 'NETPROFIT',
+    'EPSJB', 'ROEJQ',
+    'TOTALOPERATEREVE', 'MLR',
+    'PARENTNETPROFIT', 'KCFJCXSYJLR',
+    'TOTALOPERATEREVETZ', 'PARENTNETPROFITTZ',
+    'BPS',
   ].join(',');
   const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
   const data = await jsonp(url, cbName);
@@ -66,8 +65,8 @@ async function fetchCashFlowData(code: string): Promise<Map<string, { operatingC
   try {
     const cbName = `fin_cf_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    // 现金流量表关键字段
-    const columns = 'SECURITY_CODE,REPORT_DATE,NETCASH_OPERATE,NETCASH_INVEST,NETCASH_FINANCE,CASH_RELATED,PURCHASE_FIXED_ASSETS,CONSTRUCT_FIXED_ASSETS,DIV_PROF_INTEREST_PAID';
+    // 现金流量表关键字段（新字段名）
+    const columns = 'SECURITY_CODE,REPORT_DATE,NETCASH_OPERATE,NETCASH_INVEST,NETCASH_FINANCE,CONSTRUCT_LONG_ASSET,ASSIGN_DIVIDEND_PORFIT,SUBSIDIARY_PAY_DIVIDEND';
     const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GCASHFLOW&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
     const data = await jsonp(url, cbName);
     const items = data?.result?.data || [];
@@ -80,9 +79,9 @@ async function fetchCashFlowData(code: string): Promise<Map<string, { operatingC
       const investingCF = (item.NETCASH_INVEST || 0) / 1e8;
       const financingCF = (item.NETCASH_FINANCE || 0) / 1e8;
       // 资本支出：购建固定资产等
-      const capex = Math.abs(((item.PURCHASE_FIXED_ASSETS || 0) + (item.CONSTRUCT_FIXED_ASSETS || 0)) / 1e8);
+      const capex = Math.abs((item.CONSTRUCT_LONG_ASSET || 0) / 1e8);
       // 分红支出
-      const dividendPaid = Math.abs((item.DIV_PROF_INTEREST_PAID || 0) / 1e8);
+      const dividendPaid = Math.abs(((item.ASSIGN_DIVIDEND_PORFIT || 0) + (item.SUBSIDIARY_PAY_DIVIDEND || 0)) / 1e8);
 
       result.set(year, { operatingCF, investingCF, financingCF, capex, dividendPaid });
     }
@@ -101,7 +100,7 @@ async function fetchBalanceSheetData(code: string): Promise<Map<string, { totalA
   try {
     const cbName = `fin_bs_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,PARENT_EQUITY,BPS';
+    const columns = 'SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY,BPS';
     const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
     const data = await jsonp(url, cbName);
     const items = data?.result?.data || [];
@@ -112,7 +111,7 @@ async function fetchBalanceSheetData(code: string): Promise<Map<string, { totalA
 
       result.set(year, {
         totalAssets: (item.TOTAL_ASSETS || 0) / 1e8,
-        totalEquity: (item.PARENT_EQUITY || item.TOTAL_EQUITY || 0) / 1e8,
+        totalEquity: (item.TOTAL_PARENT_EQUITY || item.TOTAL_EQUITY || 0) / 1e8,
         totalDebt: (item.TOTAL_LIABILITIES || 0) / 1e8,
         bvps: item.BPS || 0,
       });
@@ -132,7 +131,7 @@ async function fetchPerShareData(code: string): Promise<Map<string, { eps: numbe
   try {
     const cbName = `fin_ps_${code}_${Date.now()}`;
     const filter = `(SECURITY_CODE="${code}")`;
-    const columns = 'SECURITY_CODE,REPORT_DATE,BASIC_EPS,BPS,WEIGHTAVG_ROE';
+    const columns = 'SECURITY_CODE,REPORT_DATE,EPSJB,BPS,ROEJQ';
     const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=${columns}&filter=${encodeURIComponent(filter)}&pageNumber=1&pageSize=8&sortTypes=-1&sortColumns=REPORT_DATE&cb=${cbName}`;
     const data = await jsonp(url, cbName);
     const items = data?.result?.data || [];
@@ -142,9 +141,9 @@ async function fetchPerShareData(code: string): Promise<Map<string, { eps: numbe
       if (!year) continue;
 
       result.set(year, {
-        eps: item.BASIC_EPS || 0,
+        eps: item.EPSJB || 0,
         bvps: item.BPS || 0,
-        roe: item.WEIGHTAVG_ROE || 0,
+        roe: item.ROEJQ || 0,
       });
     }
   } catch (e) {
@@ -219,11 +218,12 @@ export async function fetchFinancialStatements(code: string): Promise<FinancialS
       if (key === year) { ps = val; break; }
     }
 
-    const revenue = (item.OPERATE_INCOME || item.TOTAL_OPERATE_INCOME || 0) / 1e8;
-    const netIncome = (item.PARENT_NETPROFIT || item.NETPROFIT || 0) / 1e8;
-    const costOfRevenue = (item.OPERATE_COST || 0) / 1e8;
-    const grossProfit = revenue - costOfRevenue;
-    const operatingProfit = (item.NETPROFIT || 0) / 1e8;
+    const revenue = (item.TOTALOPERATEREVE || 0) / 1e8;
+    const netIncome = (item.PARENTNETPROFIT || 0) / 1e8;
+    // 毛利 = 营收 - 成本，MLR 字段就是毛利（如茅台 MLR=1172亿）
+    const grossProfit = (item.MLR || 0) / 1e8;
+    const costOfRevenue = grossProfit > 0 ? revenue - grossProfit : 0;
+    const operatingProfit = netIncome; // 此接口无单独营业利润字段，用归母净利润近似
 
     const reportDate = item.REPORT_DATE || '';
 
@@ -242,7 +242,7 @@ export async function fetchFinancialStatements(code: string): Promise<FinancialS
       grossProfit: sanitize(grossProfit, -1e6, 1e6, 0),
       operatingProfit: sanitize(operatingProfit, -1e6, 1e6, 0),
       netIncome: safeNetIncome,
-      eps: sanitize(ps.eps || item.BASIC_EPS || 0, -1000, 1000, 0),
+      eps: sanitize(ps.eps || item.EPSJB || 0, -1000, 1000, 0),
       totalAssets: safeTotalAssets,
       totalEquity: sanitize(bs.totalEquity, 0, 1e8, 0),
       totalDebt: safeTotalDebt,
@@ -253,13 +253,13 @@ export async function fetchFinancialStatements(code: string): Promise<FinancialS
       capex: sanitize(cf.capex, 0, 1e6, 0),
       freeCF: sanitize(cf.operatingCF - cf.capex, -1e6, 1e6, 0),
       dividendPaid: sanitize(cf.dividendPaid, 0, 1e6, 0),
-      roe: sanitize(ps.roe || item.WEIGHTAVG_ROE || 0, -50, 100, 0),
+      roe: sanitize(ps.roe || item.ROEJQ || 0, -50, 100, 0),
       roa: safeTotalAssets > 0 ? sanitize((safeNetIncome / safeTotalAssets) * 100, -50, 50, 0) : 0,
       grossMargin: safeRevenue > 0 ? sanitize((grossProfit / safeRevenue) * 100, -100, 100, 0) : 0,
       netMargin: safeRevenue > 0 ? sanitize((safeNetIncome / safeRevenue) * 100, -100, 100, 0) : 0,
       debtRatio: safeDebtRatio,
-      revenueGrowth: sanitize(item.YSTZ || 0, -100, 1000, 0),
-      netIncomeGrowth: sanitize(item.SJLTZ || 0, -100, 1000, 0),
+      revenueGrowth: sanitize(item.TOTALOPERATEREVETZ || 0, -100, 1000, 0),
+      netIncomeGrowth: sanitize(item.PARENTNETPROFITTZ || 0, -100, 1000, 0),
       payoutRatio: safeNetIncome > 0 ? sanitize((cf.dividendPaid / safeNetIncome) * 100, 0, 100, 0) : 0,
     });
   }
