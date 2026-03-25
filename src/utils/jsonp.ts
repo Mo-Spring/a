@@ -15,8 +15,8 @@ function uniqueId(prefix: string): string {
   return `${prefix}_${Date.now()}_${++counter}`;
 }
 
-function cleanupScript(cbName: string) {
-  pendingRequests.delete(cbName);
+function cleanupScript(cbName: string, key?: string) {
+  if (key) pendingRequests.delete(key);
   delete (window as any)[cbName];
   document.getElementById(cbName)?.remove();
 }
@@ -42,25 +42,26 @@ export function jsonp<T = any>(url: string, options: JsonpOptions = {}): Promise
 
   return new Promise<T>((resolve, reject) => {
     const cbName = uniqueId('jsonp');
-    if (key) pendingRequests.set(key);
+    if (key) pendingRequests.set(key, undefined as any);
 
     const timer = setTimeout(() => {
-      cleanupScript(cbName);
+      cleanupScript(cbName, key);
       reject(new Error('JSONP timeout'));
     }, timeout);
 
     (window as any)[cbName] = (data: T) => {
       clearTimeout(timer);
-      cleanupScript(cbName);
+      cleanupScript(cbName, key);
       resolve(data);
     };
 
     const script = document.createElement('script');
     script.id = cbName;
+    if (key) script.dataset.jsonpKey = key;
     script.src = url;
     script.onerror = () => {
       clearTimeout(timer);
-      cleanupScript(cbName);
+      cleanupScript(cbName, key);
 
       if (fetchFallback) {
         fetch(fetchFallback)
@@ -83,7 +84,8 @@ export function jsonp<T = any>(url: string, options: JsonpOptions = {}): Promise
 export function cleanupAllJsonp() {
   document.querySelectorAll('script[id^="jsonp_"]').forEach(el => {
     const id = el.getAttribute('id');
-    if (id) cleanupScript(id);
+    const key = (el as HTMLElement).dataset.jsonpKey;
+    if (id) cleanupScript(id, key);
   });
   pendingRequests.clear();
 }
