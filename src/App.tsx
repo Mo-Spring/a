@@ -24,7 +24,7 @@ import { useIndexValuation } from './hooks/useIndexValuation';
 import { useLivePrice } from './hooks/useLivePrice';
 import { useFinancialStatements } from './hooks/useFinancialStatements';
 import { useValuation } from './hooks/useValuation';
-import { useStockPercentiles } from './hooks/useStockPercentiles';  // ← 新增
+import { useStockPercentiles } from './hooks/useStockPercentiles';
 
 // ─── View Components ───
 import HomeView from './views/HomeView';
@@ -129,8 +129,8 @@ export default function App() {
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       const timer = setTimeout(() => {
-        StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-        StatusBar.setBackgroundColor({ color: darkMode ? '#0f172a' : '#ffffff' }).catch(() => {});
+        StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#00000000' }).catch(() => {});
         StatusBar.setStyle({ style: darkMode ? Style.Dark : Style.Light }).catch(() => {});
       }, 200);
       return () => clearTimeout(timer);
@@ -207,17 +207,13 @@ export default function App() {
   const allIndexCodes = indices.map(i => i.c).join(',');
   useIndexValuation(indices, allIndexCodes, setIndexVal);
 
-  // Live price — only when viewing a company detail
   const currentCompCode = view === 'comp' ? navArgs[0] : undefined;
   useLivePrice(currentCompCode, allIndustries, setLivePrice);
 
-  // Stock percentiles — fetch historical PE/PB and compute percentile  // ← 新增
-  useStockPercentiles(currentCompCode, setBatchData);                   // ← 新增
+  useStockPercentiles(currentCompCode, setBatchData);
 
-  // Financial statements — only when viewing a company detail
   useFinancialStatements(currentCompCode, setStockStatements, setStockDetailLoading);
 
-  // Valuation computation — runs when batch data or statements change
   useValuation(currentCompCode, allIndustries, batchData, stockStatements, valuationConfig, setValuationResults);
 
   // ─── Persistence ───
@@ -388,9 +384,9 @@ export default function App() {
 
   return (
     <AppContext.Provider value={contextValue}>
-      <div className={`min-h-screen bg-surface pb-24 ${darkMode ? 'text-slate-100' : ''}`}>
+      <div className={`min-h-screen bg-surface ${darkMode ? 'text-slate-100' : ''}`} style={{ paddingBottom: 'calc(96px + var(--sab))' }}>
         {/* Top Bar */}
-        <div className="sticky top-0 z-50 nav-glass px-4 py-3 flex items-center justify-between">
+        <div className="sticky top-0 z-50 nav-glass px-4 pb-3 flex items-center justify-between" style={{ paddingTop: 'calc(var(--sat) + 4px)' }}>
           <div className="flex items-center gap-2.5">
             {navStack.length > 0 && view !== 'home' && (
               <button onClick={goBack} className="p-1.5 -ml-1 rounded-xl text-slate-500 hover:bg-slate-100/60 active:scale-90 transition-all">
@@ -425,7 +421,7 @@ export default function App() {
         </main>
 
         {/* Bottom Nav */}
-        <nav className="fixed bottom-0 left-0 right-0 nav-bottom-glass flex justify-around items-center py-1.5 px-4 pb-[calc(6px+env(safe-area-inset-bottom))] z-50">
+        <nav className="fixed bottom-0 left-0 right-0 nav-bottom-glass flex justify-around items-center py-1.5 px-4 z-50" style={{ paddingBottom: 'calc(12px + var(--sab))' }}>
           {[
             { id: 'home', l: '行业', i: LayoutGrid },
             { id: 'index_list', l: '指数', i: TrendingUp },
