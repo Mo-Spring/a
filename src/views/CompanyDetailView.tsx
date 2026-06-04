@@ -74,8 +74,8 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
   let impliedGrowth: number | null = null;
   let dcfWacc = 0, dcfPhases: any[] = [], dcfProjection: any[] = [], dcfTVRatio = 0, dcfBasis = 'fcf';
   let dcfSensitivity: any[] = [];
-  let relIndustryPE = 0, relHistoricalPE = 0, relPEGPE = 0, relPEG = 0;
-  let relHistoricalStats: any = undefined;
+  let relIndustryPE = 0, relRoeAdjustedPE = 0, relPEGPE = 0, relPEG = 0;
+  let relPeerStats: any = undefined;
   let verdict: string = 'fair', verdictText = '—';
   let modelWeights = { dcf: 0.50, relative: 0.50 };
   let moatSignals: any[] = [];
@@ -95,10 +95,10 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
     relFairPE = valResult.relative.fairPE;
     relFairPrice = valResult.relative.fairPrice;
     relIndustryPE = valResult.relative.industryFairPE;
-    relHistoricalPE = valResult.relative.historicalFairPE;
+    relRoeAdjustedPE = valResult.relative.roeAdjustedFairPE;
     relPEGPE = valResult.relative.pegFairPE;
     relPEG = valResult.relative.peg;
-    relHistoricalStats = valResult.relative.historicalPEStats;
+    relPeerStats = valResult.relative.peerPEStats;
 
     compositeFair = valResult.compositeFairValue;
     compositeMargin = valResult.marginOfSafety;
@@ -383,9 +383,9 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
                   <div className="text-[8px] text-blue-400 mt-0.5">同业对标</div>
                 </div>
                 <div className="bg-gradient-to-br from-violet-50 to-violet-100/50 rounded-xl p-2.5 text-center border border-violet-100/50">
-                  <div className="text-[8px] text-violet-400 font-bold uppercase tracking-wider mb-1">历史PE</div>
-                  <div className="text-sm font-bold text-violet-700 tabular-nums">{relHistoricalPE.toFixed(1)}</div>
-                  <div className="text-[8px] text-violet-400 mt-0.5">ROE修正</div>
+                  <div className="text-[8px] text-violet-400 font-bold uppercase tracking-wider mb-1">ROE修正PE</div>
+                  <div className="text-sm font-bold text-violet-700 tabular-nums">{relRoeAdjustedPE.toFixed(1)}</div>
+                  <div className="text-[8px] text-violet-400 mt-0.5">历史ROE修正</div>
                 </div>
                 <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl p-2.5 text-center border border-amber-100/50">
                   <div className="text-[8px] text-amber-400 font-bold uppercase tracking-wider mb-1">PEG PE</div>
@@ -410,32 +410,32 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
                 </div>
               </div>
 
-              {/* PE 历史百分位 */}
-              {relHistoricalStats && (
+              {/* 同业 PE 排名 */}
+              {relPeerStats && (
                 <div className="bg-white rounded-xl p-3 border border-slate-100 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-slate-500">PE 历史百分位</span>
+                    <span className="text-[9px] font-bold text-slate-500">同业 PE 排名</span>
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
-                      relHistoricalStats.percentile < 0.3 ? 'bg-emerald-50 text-emerald-600' :
-                      relHistoricalStats.percentile > 0.7 ? 'bg-red-50 text-red-600' :
+                      relPeerStats.peerPercentile < 0.3 ? 'bg-emerald-50 text-emerald-600' :
+                      relPeerStats.peerPercentile > 0.7 ? 'bg-red-50 text-red-600' :
                       'bg-amber-50 text-amber-600'
                     }`}>
-                      {(relHistoricalStats.percentile * 100).toFixed(0)}%
-                      {relHistoricalStats.percentile < 0.3 ? ' 偏低' : relHistoricalStats.percentile > 0.7 ? ' 偏高' : ' 适中'}
+                      {(relPeerStats.peerPercentile * 100).toFixed(0)}%
+                      {relPeerStats.peerPercentile < 0.3 ? ' 偏低' : relPeerStats.peerPercentile > 0.7 ? ' 偏高' : ' 适中'}
                     </span>
                   </div>
                   <div className="relative h-3 bg-slate-100 rounded-full overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-r from-emerald-300 via-amber-300 to-red-300 rounded-full" />
                     <div
                       className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md border-2 border-indigo-500 z-10 transition-all duration-500"
-                      style={{ left: `calc(${relHistoricalStats.percentile * 100}% - 6px)` }}
-                      title={`当前 PE ${relHistoricalStats.current.toFixed(1)}`}
+                      style={{ left: `calc(${relPeerStats.peerPercentile * 100}% - 6px)` }}
+                      title={`当前 PE ${relPeerStats.current.toFixed(1)}`}
                     />
                   </div>
                   <div className="flex justify-between text-[9px] text-slate-400 tabular-nums">
-                    <span>{relHistoricalStats.min.toFixed(1)}x</span>
-                    <span className="font-bold text-indigo-600">当前 {relHistoricalStats.current.toFixed(1)}x</span>
-                    <span>{relHistoricalStats.max.toFixed(1)}x</span>
+                    <span>{relPeerStats.min.toFixed(1)}x</span>
+                    <span className="font-bold text-indigo-600">当前 {relPeerStats.current.toFixed(1)}x</span>
+                    <span>{relPeerStats.max.toFixed(1)}x</span>
                   </div>
                 </div>
               )}
