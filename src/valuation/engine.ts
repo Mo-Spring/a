@@ -42,6 +42,19 @@ function std(arr: number[]): number {
 // Beta 估计（启发式，基于真实数据）
 // ═══════════════════════════════════════
 
+/**
+ * 启发式 Beta 估算
+ *
+ * 注意：这不是基于市场数据回归的精确 Beta，而是基于财务指标
+ * （盈利波动性、市值规模、负债水平、PE 估值）的近似估计。
+ * 如需精确 Beta，建议使用市场收益率协方差计算。
+ *
+ * 调整逻辑：
+ * - 盈利波动性高 → Beta 上调（盈利不稳定意味着更高系统性风险）
+ * - 小市值 → Beta 上调（小盘股通常波动更大）
+ * - 高负债 → Beta 上调（财务杠杆放大风险）
+ * - 极端 PE → Beta 微调（估值泡沫或低迷反映市场情绪）
+ */
 function estimateBeta(d: StockInput): number {
   let b = 1.0;
 
@@ -83,6 +96,23 @@ function getShares(d: StockInput): number {
   return 1e9;
 }
 
+/**
+ * 行业资本支出系数
+ *
+ * 根据资产负债率等指标判断行业重资产程度：
+ * - 重资产行业（制造业、能源、材料）：totalDebt > 60 → 0.45, 40-60 → 0.55
+ * - 轻资产行业（互联网、消费、医药）：totalDebt < 20 → 0.85, 20-40 → 0.70
+ *
+ * 注：理想情况下应基于行业分类（如 GICS 行业代码）精确判断，
+ * 此处使用资产负债率作为代理指标。
+ */
+function industryCapexFactor(d: StockInput): number {
+  if (d.totalDebt > 60) return 0.45;   // 高负债 → 重资产行业，低 capex 系数
+  if (d.totalDebt > 40) return 0.55;   // 中等偏高负债
+  if (d.totalDebt > 20) return 0.70;   // 中等偏低负债 → 默认系数
+  return 0.85;                          // 低负债 → 轻资产行业，高 capex 系数
+}
+
 /** 获取每股 FCF（优先真实数据） */
 function getFCFPerShare(d: StockInput): number {
   const shares = getShares(d);
@@ -93,7 +123,10 @@ function getFCFPerShare(d: StockInput): number {
     if (latest.freeCF > 0) return (latest.freeCF * 1e8) / shares;
   }
   if (d.freeCF > 0) return (d.freeCF * 1e8) / shares;
-  if (d.operatingCF > 0) return (d.operatingCF * 0.7 * 1e8) / shares;
+  if (d.operatingCF > 0) {
+    const capexFactor = industryCapexFactor(d);
+    return (d.operatingCF * capexFactor * 1e8) / shares;
+  }
   if (d.netIncome > 0) return (d.netIncome * 1e8) / shares;
   if (d.eps > 0) return d.eps;
   return 0;
@@ -180,7 +213,7 @@ function estimateGrowthRates(d: StockInput): { baseGrowth: number; pegGrowth: nu
   // ROE 约束：增长率不应超过可持续增长率太多
   if (d.roe > 0 && d.roe < 50) {
     const payout = d.dy > 3 ? 0.4 : d.dy > 1 ? 0.6 : 0.8;
-    const maxGrowth = (d.roe / 100) * (1 - payout) * 1.5;
+    const maxGrowth = (d.roe / 100) * (1 - payout) * 1.2;
     base = Math.min(base, maxGrowth);
   }
 
@@ -199,6 +232,40 @@ function estimateGrowthRates(d: StockInput): { baseGrowth: number; pegGrowth: nu
 }
 
 // ═══════════════════════════════════════
+// 净负债估算
+// ═══════════════════════════════════════
+
+/**
+ * 估算净负债（单位：亿元）
+ *
+ * 从资产负债率倒推总负债，再估算现金得到净负债。
+ * 现金估计 = 经营现金流或净利润 × 1.5（近似倍数）。
+ * 净负债 = 总负债 - 估计现金（不小于 0）。
+ *
+ * 推导：总负债 / (总负债 + 市值) = totalDebt / 100
+ * → 总负债 = 市值 × totalDebt / (100 - totalDebt)
+ */
+function estimateNetDebt(d: StockInput): number {
+  if (d.totalDebt <= 0 || d.totalDebt >= 100 || d.mcap <= 0) return 0;
+
+  // 从资产负债率反推总负债（亿）
+  const totalLiabilities = d.mcap * d.totalDebt / (100 - d.totalDebt);
+
+  // 估算现金：优先经营CF，其次净利润，×1.5倍近似
+  let cashEstimate = 0;
+  if (d.statements.length > 0) {
+    const latest = d.statements[0];
+    if (latest.operatingCF > 0) cashEstimate = latest.operatingCF * 1.5;
+    else if (latest.netIncome > 0) cashEstimate = latest.netIncome * 1.5;
+  }
+  if (cashEstimate <= 0 && d.operatingCF > 0) cashEstimate = d.operatingCF * 1.5;
+  if (cashEstimate <= 0 && d.netIncome > 0) cashEstimate = d.netIncome * 1.5;
+
+  const netDebt = Math.max(0, totalLiabilities - cashEstimate);
+  return netDebt;
+}
+
+// ═══════════════════════════════════════
 // 模型 ①：DCF 现金流折现
 // ═══════════════════════════════════════
 
@@ -213,6 +280,7 @@ function modelDCF(
     fairValue: { low: 0, mid: 0, high: 0 },
     impliedPE: { low: 0, mid: 0, high: 0 },
     wacc: 0, terminalValueRatio: 0, phases: [], projection: [], usedBasis: basis, confidence: 0,
+    netDebtPerShare: 0,
   };
 
   if (fcfPS <= 0 || d.price <= 0) return empty;
@@ -290,16 +358,21 @@ function modelDCF(
     return clamp(c, 0, 1);
   })();
 
+  // 净债务调整：每股内在价值 = (DCF企业价值 - 净负债) / 总股本
+  const netDebt = estimateNetDebt(d);
+  const shares = getShares(d);
+  const netDebtPerShare = shares > 0 ? (netDebt * 1e8) / shares : 0;
+
   return {
     fairValue: {
-      low: Math.max(0, bear.value),
-      mid: Math.max(0, base.value),
-      high: Math.max(0, bull.value),
+      low: Math.max(0, bear.value - netDebtPerShare),
+      mid: Math.max(0, base.value - netDebtPerShare),
+      high: Math.max(0, bull.value - netDebtPerShare),
     },
     impliedPE: {
-      low: Math.max(0, bear.value) / eps,
-      mid: Math.max(0, base.value) / eps,
-      high: Math.max(0, bull.value) / eps,
+      low: Math.max(0, bear.value - netDebtPerShare) / eps,
+      mid: Math.max(0, base.value - netDebtPerShare) / eps,
+      high: Math.max(0, bull.value - netDebtPerShare) / eps,
     },
     wacc,
     terminalValueRatio: base.tvRatio,
@@ -308,6 +381,7 @@ function modelDCF(
     usedBasis: basis,
     confidence,
     sensitivity,
+    netDebtPerShare,
   };
 }
 
@@ -326,23 +400,27 @@ function modelRelative(
   const indPE = positiveOr(ind.pe, 20);
 
   // ① 行业 PE × ROE 修正（降低修正系数上限）
-  // ROE 20% → 1.0x，ROE 30% → 1.5x，ROE 40% → 1.8x，上限 2.0x
-  const roeAdj = roe > 0 ? clamp(0.5 + 5.0 * (roe - 0.10), 0.3, 2.0) : 0.5;
+  // 公式：roeIntercept + roeSlope × (ROE - roeBase)
+  // 默认：0.5 + 5.0 × (ROE - 0.10)，ROE 20% → 1.0x，ROE 30% → 1.5x，上限 2.0x
+  const roeBase = p.roeBase ?? 0.10;
+  const roeSlope = p.roeSlope ?? 5.0;
+  const roeIntercept = p.roeIntercept ?? 0.5;
+  const roeAdj = roe > 0 ? clamp(roeIntercept + roeSlope * (roe - roeBase), 0.3, 2.0) : roeIntercept;
   const industryFairPE = indPE * roeAdj;
 
-  // ② 历史 PE（用真实报表数据）
-  let histFairPE = indPE;
+  // ② ROE 修正的公平 PE（基于历史ROE均值修正行业PE）
+  let roeAdjustedFairPE = indPE;
   const stmts = d.statements;
   if (stmts.length >= 3) {
     const histROEs = stmts.slice(0, Math.min(5, stmts.length)).map(s => s.roe).filter(v => v > 0);
     if (histROEs.length >= 2) {
       const avgROE = avg(histROEs);
-      histFairPE = indPE * clamp(0.5 + 5.0 * (avgROE / 100 - 0.10), 0.3, 2.0);
+      roeAdjustedFairPE = indPE * clamp(roeIntercept + roeSlope * (avgROE / 100 - roeBase), 0.3, 2.0);
     }
   } else if (roe > 0) {
-    histFairPE = indPE * clamp(0.5 + 5.0 * (roe - 0.10), 0.3, 2.0);
+    roeAdjustedFairPE = indPE * clamp(roeIntercept + roeSlope * (roe - roeBase), 0.3, 2.0);
   }
-  histFairPE = clamp(histFairPE, 3, 80);
+  roeAdjustedFairPE = clamp(roeAdjustedFairPE, 3, 80);
 
   // ③ PEG 修正（用共享的 pegGrowth）
   let pegFairPE: number;
@@ -367,21 +445,21 @@ function modelRelative(
   const totalW = wInd + wHist + wGrow;
   if (totalW > 0) { wInd /= totalW; wHist /= totalW; wGrow /= totalW; }
 
-  const fairPE = industryFairPE * wInd + histFairPE * wHist + pegFairPE * wGrow;
+  const fairPE = industryFairPE * wInd + roeAdjustedFairPE * wHist + pegFairPE * wGrow;
   const clampedFairPE = clamp(fairPE, 3, 80);
   const eps = positiveOr(d.eps, 0.01);
   const fairPrice = clampedFairPE * eps;
 
-  // 历史 PE 百分位（同行比较）
-  let historicalPEStats: RelativeResult['historicalPEStats'] = undefined;
+  // 同行 PE 统计（基于行业 peers 的 PE 排名）
+  let peerPEStats: RelativeResult['peerPEStats'] = undefined;
   if (ind.peers && ind.peers.length >= 3) {
     const peerPEs = ind.peers.map(p => p.pe).filter(v => v > 0 && v < 500).sort((a, b) => a - b);
     if (peerPEs.length >= 3 && d.pe > 0) {
       const below = peerPEs.filter(p => p < d.pe).length;
-      historicalPEStats = {
+      peerPEStats = {
         min: peerPEs[0], max: peerPEs[peerPEs.length - 1],
         median: peerPEs[Math.floor(peerPEs.length / 2)],
-        current: d.pe, percentile: below / peerPEs.length,
+        current: d.pe, peerPercentile: below / peerPEs.length,
       };
     }
   }
@@ -398,8 +476,8 @@ function modelRelative(
   return {
     fairPE: { low: clampedFairPE * 0.8, mid: clampedFairPE, high: clampedFairPE * 1.2 },
     fairPrice: { low: fairPrice * 0.8, mid: fairPrice, high: fairPrice * 1.2 },
-    industryFairPE, historicalFairPE: histFairPE, pegFairPE,
-    peg, confidence, historicalPEStats,
+    industryFairPE, roeAdjustedFairPE, pegFairPE,
+    peg, confidence, peerPEStats,
   };
 }
 
