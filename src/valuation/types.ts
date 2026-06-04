@@ -93,6 +93,8 @@ export interface ValuationParams {
   };
   pe: {
     roeBase: number;          // ROE 基准值
+    roeSlope?: number;        // ROE→PE 斜率系数，默认 5.0
+    roeIntercept?: number;    // ROE→PE 截距，默认 0.5
     industryWeight: number;   // 行业 PE 权重
     historicalWeight: number; // 历史 PE 权重
     growthWeight: number;     // PEG 权重
@@ -117,6 +119,7 @@ export interface DCFResult {
   projection: Array<{ year: number; fcf: number; pv: number }>;
   usedBasis: 'fcf' | 'netIncome' | 'eps';
   confidence: number;
+  netDebtPerShare?: number;     // 每股净负债
   // 敏感性分析
   sensitivity?: Array<{ growth: number; wacc: number; value: number }>;
 }
@@ -126,17 +129,17 @@ export interface RelativeResult {
   fairPE: ValuationRange;
   fairPrice: ValuationRange;
   industryFairPE: number;
-  historicalFairPE: number;
+  roeAdjustedFairPE: number;
   pegFairPE: number;
   peg: number;
   confidence: number;
-  // 历史 PE 区间（近 5 年）
-  historicalPEStats?: {
+  // 同业 PE 区间
+  peerPEStats?: {
     min: number;
     max: number;
     median: number;
     current: number;
-    percentile: number;  // 当前 PE 在历史中的百分位
+    peerPercentile: number;  // 当前 PE 在同业中的百分位排名
   };
 }
 
