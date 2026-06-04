@@ -52,6 +52,7 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
   const ii = currentIndustries.findIndex(i => i.id === ind?.id);
 
   const [detailTab, setDetailTab] = useState<'valuation' | 'financial'>('valuation');
+  const [valuationView, setValuationView] = useState<'dcf' | 'pe' | 'composite'>('composite');
   const isLoading = stockDetailLoading[tCode];
   const valResult = valuationResults[tCode];
   const stmts = stockStatements[tCode] || [];
@@ -139,14 +140,52 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
     verdictText = compositeMargin.mid > 10 ? '低估' : compositeMargin.mid > -10 ? '合理' : '高估';
   }
 
+  // 根据估值视角计算显示值
+  const displayFairValue = valuationView === 'dcf' ? dcfFair.mid : 
+                          valuationView === 'pe' ? relFairPrice.mid : 
+                          compositeFair.mid;
+  const displayMargin = valuationView === 'dcf' ? ((dcfFair.mid - currentPrice) / currentPrice) * 100 :
+                       valuationView === 'pe' ? ((relFairPrice.mid - currentPrice) / currentPrice) * 100 :
+                       compositeMargin.mid;
+  const displayConfidence = valuationView === 'dcf' ? (valResult?.dcf?.confidence || 0) :
+                           valuationView === 'pe' ? (valResult?.relative?.confidence || 0) :
+                           (valResult?.confidence || 0);
+  // 判定结论
+  let displayVerdict = 'fair';
+  let displayVerdictText = '—';
+  if (currentPE <= 0) {
+    displayVerdict = 'loss';
+    displayVerdictText = '⚠️ 亏损';
+  } else {
+    const marginVal = displayMargin;
+    if (marginVal > 30) {
+      displayVerdict = 'severelyUndervalued';
+      displayVerdictText = `严重低估 +${Math.round(marginVal)}%`;
+    } else if (marginVal > 10) {
+      displayVerdict = 'undervalued';
+      displayVerdictText = `低估 +${Math.round(marginVal)}%`;
+    } else if (marginVal > -10) {
+      displayVerdict = 'fair';
+      displayVerdictText = `合理 ${marginVal >= 0 ? '+' : ''}${Math.round(marginVal)}%`;
+    } else if (marginVal > -30) {
+      displayVerdict = 'overvalued';
+      displayVerdictText = `高估 ${Math.round(marginVal)}%`;
+    } else {
+      displayVerdict = 'severelyOvervalued';
+      displayVerdictText = `严重高估 ${Math.round(marginVal)}%`;
+    }
+  }
+
   const fairPrice = compositeFair.mid > 0 ? compositeFair.mid : 0;
   const margin = compositeMargin.mid;
 
-  let vc = 'bg-slate-50 text-slate-400', vt = '—';
-  if (currentPE <= 0) { vc = 'bg-amber-50 text-amber-600'; vt = '⚠️ 亏损'; }
-  else if (margin > 25) { vc = 'bg-emerald-50 text-emerald-600'; vt = `低估 +${margin.toFixed(0)}%`; }
-  else if (margin > -15) { vc = 'bg-amber-50 text-amber-600'; vt = `合理 ${margin >= 0 ? '+' : ''}${margin.toFixed(0)}%`; }
-  else { vc = 'bg-red-50 text-red-600'; vt = `高估 ${margin.toFixed(0)}%`; }
+  let vc = 'bg-slate-50 text-slate-400', vt = displayVerdictText;
+  if (displayVerdict === 'loss') { vc = 'bg-amber-50 text-amber-600'; }
+  else if (displayVerdict === 'severelyUndervalued') { vc = 'bg-emerald-50 text-emerald-600'; }
+  else if (displayVerdict === 'undervalued') { vc = 'bg-emerald-50 text-emerald-600'; }
+  else if (displayVerdict === 'fair') { vc = 'bg-amber-50 text-amber-600'; }
+  else if (displayVerdict === 'overvalued') { vc = 'bg-amber-50 text-amber-600'; }
+  else if (displayVerdict === 'severelyOvervalued') { vc = 'bg-red-50 text-red-600'; }
 
   const rg = getGrade(currentROE, [25, 20, 15, 10]);
   const dg = getGrade(currentDY, [5, 3, 2, 1]);
@@ -202,13 +241,58 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
             </div>
           </div>
 
+          {/* 估值视角切换 */}
+          <div className="flex gap-1 bg-slate-100 rounded-2xl p-1">
+            <button
+              onClick={() => setValuationView('dcf')}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                valuationView === 'dcf'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              DCF 视角
+            </button>
+            <button
+              onClick={() => setValuationView('pe')}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                valuationView === 'pe'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              PE 视角
+            </button>
+            <button
+              onClick={() => setValuationView('composite')}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                valuationView === 'composite'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              综合
+            </button>
+          </div>
+
+          {/* 数据不足警告 */}
+          {valuationView !== 'composite' && displayConfidence < 0.4 && currentPE > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[10px] text-amber-600 font-medium flex items-center gap-1.5">
+              <span>⚠️</span> 该模型数据不足，估值仅供参考
+            </div>
+          )}
+
           {currentPE > 0 ? (
             <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex justify-between items-center">
               <div>
                 <div className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">估值综合</div>
                 <div className="text-lg font-bold text-indigo-600 tabular-nums">
-                  {fairPrice > 0 ? `¥${fairPrice.toFixed(2)}` : '—'}
-                  <span className="text-xs font-medium ml-1 opacity-70">PE {compositeFair.mid.toFixed(1)}x</span>
+                  {displayFairValue > 0 ? `¥${displayFairValue.toFixed(2)}` : '—'}
+                  <span className="text-xs font-medium ml-1 opacity-70">
+                    {valuationView === 'dcf' ? `DCF ¥${dcfFair.mid.toFixed(1)}` :
+                     valuationView === 'pe' ? `PE ${relFairPE.mid.toFixed(1)}x` :
+                     `PE ${compositeFair.mid.toFixed(1)}x`}
+                  </span>
                 </div>
                 {impliedGrowth !== null && (
                   <div className="text-[10px] text-indigo-400 mt-1">
@@ -518,7 +602,9 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-slate-800">估值区间</span>
                 <span className="text-indigo-600">
-                  ¥{compositeFair.low.toFixed(1)} ~ ¥{compositeFair.mid.toFixed(1)} ~ ¥{compositeFair.high.toFixed(1)}
+                  {valuationView === 'dcf' ? `¥${dcfFair.low.toFixed(1)} ~ ¥${dcfFair.mid.toFixed(1)} ~ ¥${dcfFair.high.toFixed(1)}` :
+                   valuationView === 'pe' ? `¥${relFairPrice.low.toFixed(1)} ~ ¥${relFairPrice.mid.toFixed(1)} ~ ¥${relFairPrice.high.toFixed(1)}` :
+                   `¥${compositeFair.low.toFixed(1)} ~ ¥${compositeFair.mid.toFixed(1)} ~ ¥${compositeFair.high.toFixed(1)}`}
                 </span>
               </div>
               <div className="flex justify-between text-xs">
@@ -527,8 +613,8 @@ const CompanyDetailView = ({ code, name }: CompanyDetailViewProps) => {
               </div>
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-slate-800">安全边际</span>
-                <span className={compositeMargin.mid > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                  {compositeMargin.mid > 0 ? '+' : ''}{compositeMargin.mid.toFixed(1)}%
+                <span className={displayMargin > 0 ? 'text-emerald-600' : 'text-red-600'}>
+                  {displayMargin > 0 ? '+' : ''}{displayMargin.toFixed(1)}%
                 </span>
               </div>
             </div>
